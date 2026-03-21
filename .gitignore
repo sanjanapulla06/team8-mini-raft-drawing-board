@@ -1,5 +1,7 @@
+__pycache__/
+*.pyc
+venv/
+replicas/
 state_node*.json
 strokes_node*.json
-__pycache__/
 *.log
-venv/
