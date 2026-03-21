@@ -1,0 +1,5 @@
+state_node*.json
+strokes_node*.json
+__pycache__/
+*.log
+venv/
