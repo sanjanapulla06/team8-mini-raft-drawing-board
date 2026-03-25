@@ -4,24 +4,19 @@
 from flask import Blueprint, request, jsonify
 
 def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
-    """
-    Returns a Flask Blueprint with all RAFT RPC routes.
-    Register this in the main Flask app.
-    """
     rpc = Blueprint("rpc", __name__)
 
-    # ── POST /request-vote ────────────────────────────────────────────────────
-    @rpc.route("/request-vote", methods=["POST"])
+    # ── POST /request_vote ────────────────────────────────────────────────────
+    @rpc.route("/request_vote", methods=["POST"])
     def request_vote():
         data           = request.get_json()
         term           = data["term"]
-        candidate_id   = data["candidateId"]
-        last_log_index = data["lastLogIndex"]
-        last_log_term  = data["lastLogTerm"]
+        candidate_id   = data.get("candidateId") or data.get("candidate_id")
+        last_log_index = data.get("lastLogIndex", -1)
+        last_log_term  = data.get("lastLogTerm", -1)
 
-        print(f"[RPC] /request-vote from {candidate_id} term={term}")
+        print(f"[RPC] /request_vote from {candidate_id} term={term}")
 
-        # Step down if we see higher term
         if term > state.current_term:
             state.become_follower(term)
             election_mgr.reset_election_timer()
@@ -29,18 +24,16 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         vote_granted = False
 
         if term < state.current_term:
-            # Stale term — reject
             vote_granted = False
 
         elif state.voted_for is None or state.voted_for == candidate_id:
-            # Grant vote only if candidate log is at least as up to date
             candidate_log_ok = (
                 last_log_term > log.last_term or
                 (last_log_term == log.last_term and last_log_index >= log.last_index)
             )
             if candidate_log_ok:
-                vote_granted       = True
-                state.voted_for    = candidate_id
+                vote_granted    = True
+                state.voted_for = candidate_id
                 election_mgr.reset_election_timer()
                 print(f"[RPC] Vote GRANTED to {candidate_id}")
             else:
@@ -48,21 +41,23 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         else:
             print(f"[RPC] Vote DENIED to {candidate_id} — already voted for {state.voted_for}")
 
-        return jsonify({"term": state.current_term, "voteGranted": vote_granted})
+        return jsonify({"term": state.current_term, "voteGranted": vote_granted, "vote_granted": vote_granted})
 
 
-    # ── POST /append-entries ──────────────────────────────────────────────────
-    @rpc.route("/append-entries", methods=["POST"])
+    # ── POST /append_entries ──────────────────────────────────────────────────
+    @rpc.route("/append_entries", methods=["POST"])
     def append_entries():
-        data           = request.get_json()
-        term           = data["term"]
-        leader_id      = data["leaderId"]
-        prev_log_index = data["prevLogIndex"]
-        prev_log_term  = data["prevLogTerm"]
-        entries        = data.get("entries", [])
-        leader_commit  = data["leaderCommit"]
+        data = request.get_json()
+        term      = data["term"]
+        leader_id = data.get("leaderId") or data.get("leader_id")
 
-        # Reject stale leaders
+        # Support both Sharon's simple format and Shrivadhu's full format
+        prev_log_index = data.get("prevLogIndex", -1)
+        prev_log_term  = data.get("prevLogTerm", -1)
+        entries        = data.get("entries", [])
+        leader_commit  = data.get("leaderCommit", data.get("leader_commit", -1))
+        stroke         = data.get("stroke")  # Sharon's simple stroke format
+
         if term < state.current_term:
             return jsonify({"term": state.current_term, "success": False, "logLength": log.length})
 
@@ -72,19 +67,30 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         state.leader_id = leader_id
         election_mgr.reset_election_timer()
 
-        # Try to append entries — fails if prevLog check fails
-        ok = log.append_entries(prev_log_index, prev_log_term, entries)
+        # Handle Sharon's simple stroke format
+        if stroke:
+            entry = log.append(state.current_term, stroke)
+            on_stroke_committed(stroke)
+            print(f"[RPC] Stroke appended via Sharon format ✓")
+            return jsonify({"term": state.current_term, "success": True, "logLength": log.length, "stroke": stroke})
 
-        if not ok:
-            print(f"[RPC] /append-entries: log mismatch — returning logLength={log.length}")
-            return jsonify({"term": state.current_term, "success": False, "logLength": log.length})
+        # Handle Shrivadhu's full AppendEntries format
+        if entries:
+            ok = log.append_entries(prev_log_index, prev_log_term, entries)
+            if not ok:
+                return jsonify({"term": state.current_term, "success": False, "logLength": log.length})
 
-        # Advance commit and notify gateway of newly committed strokes
-        if leader_commit > log.commit_index:
-            old_commit = log.commit_index
-            log.advance_commit(leader_commit)
-            for entry in log.entries[old_commit + 1: log.commit_index + 1]:
-                on_stroke_committed(entry["stroke"])
+            if leader_commit > log.commit_index:
+                old_commit = log.commit_index
+                log.advance_commit(leader_commit)
+                for e in log.entries[old_commit + 1: log.commit_index + 1]:
+                    on_stroke_committed(e["stroke"])
+
+        else:
+            # Heartbeat only
+            print(f"[RPC] Heartbeat from Leader {leader_id} ✓")
+            if leader_commit > log.commit_index:
+                log.advance_commit(leader_commit)
 
         return jsonify({"term": state.current_term, "success": True, "logLength": log.length})
 
@@ -94,8 +100,8 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     def heartbeat():
         data          = request.get_json()
         term          = data["term"]
-        leader_id     = data["leaderId"]
-        leader_commit = data.get("leaderCommit", -1)
+        leader_id     = data.get("leaderId") or data.get("leader_id")
+        leader_commit = data.get("leaderCommit", data.get("leader_commit", -1))
 
         if term < state.current_term:
             return jsonify({"term": state.current_term, "success": False})
@@ -112,15 +118,15 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         return jsonify({"term": state.current_term, "success": True})
 
 
-    # ── POST /sync-log ────────────────────────────────────────────────────────
-    # Week 3: catch-up endpoint — leader pushes missing entries to restarted follower
+    # ── POST /sync_log ────────────────────────────────────────────────────────
+    @rpc.route("/sync_log", methods=["POST"])
     @rpc.route("/sync-log", methods=["POST"])
     def sync_log():
         data          = request.get_json()
         entries       = data.get("entries", [])
         leader_commit = data.get("leaderCommit", -1)
 
-        print(f"[RPC] /sync-log received {len(entries)} entries")
+        print(f"[RPC] /sync_log received {len(entries)} entries")
 
         for entry in entries:
             if entry["index"] >= log.length:
@@ -130,7 +136,6 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         if leader_commit >= 0:
             log.advance_commit(leader_commit)
 
-        # Notify gateway of all re-applied strokes
         for entry in entries:
             if entry["index"] <= log.commit_index:
                 on_stroke_committed(entry["stroke"])
@@ -153,7 +158,6 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
 
 
     # ── POST /stroke ──────────────────────────────────────────────────────────
-    # Gateway sends new strokes here — only leader handles it
     @rpc.route("/stroke", methods=["POST"])
     def stroke():
         if not state.is_leader():

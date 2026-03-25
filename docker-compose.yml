@@ -11,9 +11,9 @@ services:
       - "8081:8080"
     environment:
       - PORT=8080
-      - REPLICA1_URL=http://replica1:3001
-      - REPLICA2_URL=http://replica2:3002
-      - REPLICA3_URL=http://replica3:3003
+      - REPLICA1_URL=http://replica1:5001
+      - REPLICA2_URL=http://replica2:5002
+      - REPLICA3_URL=http://replica3:5003
     depends_on:
       - replica1
       - replica2
@@ -26,16 +26,14 @@ services:
     build: ./replica1
     container_name: replica1
     ports:
-      - "3001:3001"
+      - "5001:5001"
     environment:
       - REPLICA_ID=replica1
-      - PORT=3001
+      - PORT=5001
       - GATEWAY_URL=http://gateway:8080
-      - REPLICA1_URL=http://replica1:3001
-      - REPLICA2_URL=http://replica2:3002
-      - REPLICA3_URL=http://replica3:3003
-    volumes:
-      - ./replica1:/app
+      - REPLICA1_URL=http://replica1:5001
+      - REPLICA2_URL=http://replica2:5002
+      - REPLICA3_URL=http://replica3:5003
     networks:
       - raft-net
     restart: unless-stopped
@@ -44,16 +42,14 @@ services:
     build: ./replica2
     container_name: replica2
     ports:
-      - "3002:3002"
+      - "5002:5002"
     environment:
       - REPLICA_ID=replica2
-      - PORT=3002
+      - PORT=5002
       - GATEWAY_URL=http://gateway:8080
-      - REPLICA1_URL=http://replica1:3001
-      - REPLICA2_URL=http://replica2:3002
-      - REPLICA3_URL=http://replica3:3003
-    volumes:
-      - ./replica2:/app
+      - REPLICA1_URL=http://replica1:5001
+      - REPLICA2_URL=http://replica2:5002
+      - REPLICA3_URL=http://replica3:5003
     networks:
       - raft-net
     restart: unless-stopped
@@ -62,16 +58,14 @@ services:
     build: ./replica3
     container_name: replica3
     ports:
-      - "3003:3003"
+      - "5003:5003"
     environment:
       - REPLICA_ID=replica3
-      - PORT=3003
+      - PORT=5003
       - GATEWAY_URL=http://gateway:8080
-      - REPLICA1_URL=http://replica1:3001
-      - REPLICA2_URL=http://replica2:3002
-      - REPLICA3_URL=http://replica3:3003
-    volumes:
-      - ./replica3:/app
+      - REPLICA1_URL=http://replica1:5001
+      - REPLICA2_URL=http://replica2:5002
+      - REPLICA3_URL=http://replica3:5003
     networks:
       - raft-net
     restart: unless-stopped

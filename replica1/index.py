@@ -1,5 +1,5 @@
 # index.py — Main entry point for replica node
-# Wires together: log, replication, rpc, sync
+# Wires together: Sharon's election (r1.py) + Shrivadhu's log replication
 # Shrivadhu — Week 2 + Week 3
 
 import os
@@ -14,14 +14,25 @@ from replication import replicate_entry, send_heartbeats
 from rpc import create_rpc_blueprint
 from sync import request_catch_up
 
+# ── Import Sharon's RaftNode (election logic) ─────────────────────────────────
+from r1 import RaftNode
+
 # ── Config from environment variables ─────────────────────────────────────────
 REPLICA_ID  = os.environ.get("REPLICA_ID", "replica1")
-PORT        = int(os.environ.get("PORT", 3001))
+PORT        = int(os.environ.get("PORT", 5001))
 GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:8080")
 
-REPLICA1_URL = os.environ.get("REPLICA1_URL", "http://localhost:3001")
-REPLICA2_URL = os.environ.get("REPLICA2_URL", "http://localhost:3002")
-REPLICA3_URL = os.environ.get("REPLICA3_URL", "http://localhost:3003")
+REPLICA1_URL = os.environ.get("REPLICA1_URL", "http://replica1:5001")
+REPLICA2_URL = os.environ.get("REPLICA2_URL", "http://replica2:5002")
+REPLICA3_URL = os.environ.get("REPLICA3_URL", "http://replica3:5003")
+
+# ── Map REPLICA_ID string to integer node id for Sharon's RaftNode ────────────
+REPLICA_ID_MAP = {
+    "replica1": 1,
+    "replica2": 2,
+    "replica3": 3,
+}
+NODE_ID = REPLICA_ID_MAP.get(REPLICA_ID, 1)
 
 # ── Peers (everyone except self) ──────────────────────────────────────────────
 ALL_REPLICAS = [
@@ -31,48 +42,99 @@ ALL_REPLICAS = [
 ]
 PEERS = [r for r in ALL_REPLICAS if r["id"] != REPLICA_ID]
 
-# ── Minimal state object (Sharon will replace this with her full state) ────────
-class SimpleState:
-    def __init__(self, replica_id):
-        self.replica_id   = replica_id
-        self.role         = "follower"   # follower / candidate / leader
-        self.current_term = 0
-        self.voted_for    = None
-        self.leader_id    = None
-        self.votes_received = 0
+# ── Adapter: wraps Sharon's RaftNode to match Shrivadhu's state interface ─────
+# Sharon's RaftNode uses: node.state, node.current_term, node.voted_for, node.leader_id
+# Shrivadhu's code uses:  state.role,  state.current_term, state.voted_for, state.leader_id
 
-    def is_leader(self):    return self.role == "leader"
-    def is_follower(self):  return self.role == "follower"
-    def is_candidate(self): return self.role == "candidate"
+class SharonStateAdapter:
+    """
+    Wraps Sharon's RaftNode so Shrivadhu's replication/rpc code
+    can call state.role, state.is_leader() etc. without changes.
+    """
+    def __init__(self, raft_node):
+        self._node = raft_node
+
+    @property
+    def replica_id(self):
+        return REPLICA_ID
+
+    @property
+    def role(self):
+        return self._node.state  # Sharon uses "follower"/"candidate"/"leader"
+
+    @role.setter
+    def role(self, value):
+        self._node.state = value
+
+    @property
+    def current_term(self):
+        return self._node.current_term
+
+    @current_term.setter
+    def current_term(self, value):
+        self._node.current_term = value
+
+    @property
+    def voted_for(self):
+        return self._node.voted_for
+
+    @voted_for.setter
+    def voted_for(self, value):
+        self._node.voted_for = value
+
+    @property
+    def leader_id(self):
+        return self._node.leader_id
+
+    @leader_id.setter
+    def leader_id(self, value):
+        self._node.leader_id = value
+
+    def is_leader(self):
+        return self._node.state == "leader"
+
+    def is_follower(self):
+        return self._node.state == "follower"
+
+    def is_candidate(self):
+        return self._node.state == "candidate"
 
     def become_follower(self, term):
-        print(f"[STATE] {self.replica_id} → FOLLOWER (term {self.current_term} → {term})")
-        self.current_term  = term
-        self.role          = "follower"
-        self.voted_for     = None
-        self.votes_received = 0
+        self._node._step_down(term)
 
     def become_leader(self):
-        print(f"[STATE] {self.replica_id} → LEADER (term {self.current_term}) 🏆")
-        self.role      = "leader"
-        self.leader_id = self.replica_id
+        self._node.state     = "leader"
+        self._node.leader_id = self._node.id
 
-# ── Minimal election manager stub ─────────────────────────────────────────────
-# Sharon replaces this with her full ElectionManager
-class SimpleElectionManager:
-    def __init__(self, peers):
+
+# ── Adapter: wraps Sharon's RaftNode as ElectionManager ──────────────────────
+class SharonElectionAdapter:
+    """
+    Wraps Sharon's RaftNode so Shrivadhu's rpc code
+    can call election_mgr.reset_election_timer() without changes.
+    """
+    def __init__(self, raft_node, peers):
+        self._node = raft_node
         self.peers = peers
 
     def reset_election_timer(self):
-        pass  # Sharon's code handles this
+        # Reset Sharon's election timer by updating last_heartbeat
+        self._node.last_heartbeat = time.time()
+
 
 # ── Flask app setup ───────────────────────────────────────────────────────────
-app  = Flask(__name__)
+app = Flask(__name__)
 CORS(app)
 
-state       = SimpleState(REPLICA_ID)
-log         = Log()
-election_mgr = SimpleElectionManager(PEERS)
+# Start Sharon's RaftNode (handles all election logic)
+raft_node    = RaftNode(NODE_ID)
+
+# Wrap Sharon's node with adapters for Shrivadhu's code
+state        = SharonStateAdapter(raft_node)
+election_mgr = SharonElectionAdapter(raft_node, PEERS)
+
+# Shrivadhu's stroke log
+log = Log()
 
 # ── Notify gateway when a stroke is committed ─────────────────────────────────
 def on_stroke_committed(stroke):
@@ -86,9 +148,23 @@ def on_stroke_committed(stroke):
     except Exception as e:
         print(f"[REPLICA] Could not notify gateway: {e}")
 
-# ── Register all RPC routes (your Week 2 work) ────────────────────────────────
+# ── Register Shrivadhu's RPC routes ───────────────────────────────────────────
 blueprint = create_rpc_blueprint(state, log, election_mgr, on_stroke_committed)
 app.register_blueprint(blueprint)
+
+# ── Also register Sharon's existing routes from r1.py ────────────────────────
+# Sharon's routes: /request_vote, /append_entries, /status, /stroke, /get_strokes
+from r1 import create_app as sharon_create_app
+sharon_app = sharon_create_app(raft_node)
+
+# Copy Sharon's routes into our app (avoid duplicate /stroke and /status)
+SHARON_ROUTES_TO_SKIP = {"/stroke", "/status", "/append_entries"}
+for rule in sharon_app.url_map.iter_rules():
+    if rule.rule in SHARON_ROUTES_TO_SKIP:
+        continue
+    view_func = sharon_app.view_functions[rule.endpoint]
+    app.add_url_rule(rule.rule, endpoint=f"sharon_{rule.endpoint}",
+                     view_func=view_func, methods=rule.methods)
 
 # ── Heartbeat sender — runs in background when leader ─────────────────────────
 def heartbeat_loop():
@@ -99,8 +175,10 @@ def heartbeat_loop():
 
 # ── Start ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print(f"[REPLICA] {REPLICA_ID} starting on port {PORT}")
+    print(f"[REPLICA] {REPLICA_ID} (node {NODE_ID}) starting on port {PORT}")
     print(f"[REPLICA] Peers: {[p['id'] for p in PEERS]}")
+    print(f"[REPLICA] Sharon's election engine: ACTIVE ✓")
+    print(f"[REPLICA] Shrivadhu's log replication: ACTIVE ✓")
 
     # Start heartbeat thread
     hb_thread = threading.Thread(target=heartbeat_loop, daemon=True)

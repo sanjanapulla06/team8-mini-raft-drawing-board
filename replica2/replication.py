@@ -37,7 +37,7 @@ def replicate_entry(state, log, peers, entry, on_commit):
 
     def send_to_peer(peer):
         try:
-            res  = requests.post(f"{peer['url']}/append-entries", json=body, timeout=0.3)
+            res  = requests.post(f"{peer['url']}/append_entries", json=body, timeout=0.3)
             data = res.json()
 
             # Peer has higher term — step down
@@ -82,18 +82,18 @@ def send_sync_log(peer, from_index, log, state):
     """
     missing = log.get_from(from_index)
     if not missing:
-        print(f"[SYNC-LOG] {peer['id']} already up to date")
+        print(f"[SYNC_LOG] {peer['id']} already up to date")
         return
 
-    print(f"[SYNC-LOG] Sending {len(missing)} entries to {peer['id']} from index {from_index}")
+    print(f"[SYNC_LOG] Sending {len(missing)} entries to {peer['id']} from index {from_index}")
     try:
         requests.post(
-            f"{peer['url']}/sync-log",
+            f"{peer['url']}/sync_log",
             json={"entries": missing, "leaderCommit": log.commit_index},
             timeout=1.0
         )
     except Exception as e:
-        print(f"[SYNC-LOG] Could not reach {peer['id']}: {e}")
+        print(f"[SYNC_LOG] Could not reach {peer['id']}: {e}")
 
 
 def send_heartbeats(state, log, peers):
