@@ -3,8 +3,10 @@ import threading
 import time
 import random
 import json
+import os
 import requests
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 ALL_PEERS = {
     1: "http://localhost:5001",
@@ -15,31 +17,39 @@ ALL_PEERS = {
 HEARTBEAT_INTERVAL   = 1.0
 ELECTION_TIMEOUT_MIN = 5.0
 ELECTION_TIMEOUT_MAX = 10.0
+LOGS_DIR             = "../logs"
 
 
 class RaftNode:
     def __init__(self, node_id):
-        self.id           = node_id
-        self.peers        = {k: v for k, v in ALL_PEERS.items() if k != node_id}
-        self.current_term = 0
-        self.voted_for    = None
-        self.state        = "follower"
-        self.leader_id    = None
-        self.stroke_log   = []
+        self.id               = node_id
+        self.peers            = {k: v for k, v in ALL_PEERS.items() if k != node_id}
+        self.current_term     = 0
+        self.voted_for        = None
+        self.state            = "follower"
+        self.leader_id        = None
+        self.stroke_log       = []
+        self.election_history = []
         self.last_heartbeat   = time.time()
         self.election_timeout = self._new_timeout()
-        self.lock = threading.Lock()
+        self.lock             = threading.Lock()
+
+        os.makedirs(LOGS_DIR, exist_ok=True)
+
         self._load_state()
-        self._load_strokes()    # ← load strokes on startup
+        self._load_strokes()
+        self._load_election_history()
         threading.Thread(target=self._election_loop, daemon=True).start()
 
     def _save_state(self):
-        with open(f"state_node{self.id}.json", "w") as f:
+        path = f"{LOGS_DIR}/state_node{self.id}.json"
+        with open(path, "w") as f:
             json.dump({"term": self.current_term, "voted_for": self.voted_for}, f)
 
     def _load_state(self):
+        path = f"{LOGS_DIR}/state_node{self.id}.json"
         try:
-            with open(f"state_node{self.id}.json", "r") as f:
+            with open(path, "r") as f:
                 data = json.load(f)
                 self.current_term = data.get("term", 0)
                 self.voted_for    = data.get("voted_for", None)
@@ -48,20 +58,41 @@ class RaftNode:
             pass
 
     def _save_strokes(self):
-        with open(f"strokes_node{self.id}.json", "w") as f:
+        path = f"{LOGS_DIR}/strokes_node{self.id}.json"
+        with open(path, "w") as f:
             json.dump(self.stroke_log, f)
 
     def _load_strokes(self):
+        path = f"{LOGS_DIR}/strokes_node{self.id}.json"
         try:
-            with open(f"strokes_node{self.id}.json", "r") as f:
+            with open(path, "r") as f:
                 self.stroke_log = json.load(f)
                 self._log(f"Loaded {len(self.stroke_log)} strokes from disk")
         except FileNotFoundError:
-            pass  # first time, no strokes yet
+            pass
+
+    def _save_election_history(self, record):
+        path = f"{LOGS_DIR}/election_history.json"
+        try:
+            with open(path, "r") as f:
+                all_history = json.load(f)
+        except FileNotFoundError:
+            all_history = []
+        all_history.append(record)
+        with open(path, "w") as f:
+            json.dump(all_history, f, indent=2)
+
+    def _load_election_history(self):
+        path = f"{LOGS_DIR}/election_history.json"
+        try:
+            with open(path, "r") as f:
+                self.election_history = json.load(f)
+                self._log(f"Loaded {len(self.election_history)} past elections from logs")
+        except FileNotFoundError:
+            pass
 
     def _new_timeout(self):
-        base = ELECTION_TIMEOUT_MIN + (self.id * 1.5)
-        return base + random.uniform(0, 3.0)
+        return random.uniform(ELECTION_TIMEOUT_MIN, ELECTION_TIMEOUT_MAX)
 
     def _log(self, msg):
         print(f"[Node {self.id} | {self.state.upper():9s} | term {self.current_term}]  {msg}", flush=True)
@@ -103,16 +134,32 @@ class RaftNode:
                 pass
 
         if self.state == "candidate" and votes >= majority:
-            self._become_leader()
+            self._become_leader(votes, majority)
         else:
-            self._log(f"Lost election ({votes} votes, needed {majority})")
+            self._log(f"Lost election ({votes} votes, needed {majority}) – backing off")
             self.state = "follower"
+            backoff = random.uniform(1.0, 4.0)
+            self._log(f"Backing off for {backoff:.1f}s before next election")
+            self.last_heartbeat   = time.time()
+            self.election_timeout = self._new_timeout() + backoff
 
-    def _become_leader(self):
+    def _become_leader(self, votes, majority):
         self.state     = "leader"
         self.leader_id = self.id
         self._log("*** BECAME LEADER ***")
         self.missed_heartbeats = 0
+
+        record = {
+            "term":      self.current_term,
+            "winner":    self.id,
+            "votes":     votes,
+            "majority":  majority,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        self.election_history.append(record)
+        self._save_election_history(record)
+        self._log(f"Election recorded – term={self.current_term} votes={votes}/{majority}")
+
         threading.Thread(target=self._heartbeat_loop, daemon=True).start()
 
     def _heartbeat_loop(self):
@@ -185,7 +232,7 @@ class RaftNode:
 
             if stroke:
                 self.stroke_log.append(stroke)
-                self._save_strokes()    # ← save strokes to disk
+                self._save_strokes()
                 self._log(f"Stroke committed and replicated ✓  total={len(self.stroke_log)}")
             else:
                 self._log(f"Heartbeat from Leader Node {leader_id} ✓")
@@ -200,6 +247,7 @@ class RaftNode:
 
 def create_app(node):
     app = Flask(__name__)
+    CORS(app)
 
     @app.route("/request_vote", methods=["POST"])
     def request_vote():
@@ -221,7 +269,6 @@ def create_app(node):
             term        = node.current_term
             leader_id   = node.id
 
-        # replicate to all followers
         committed = 0
         for peer_url in node.peers.values():
             try:
@@ -233,10 +280,9 @@ def create_app(node):
             except Exception:
                 pass
 
-        # store on leader too
         with node.lock:
             node.stroke_log.append(stroke_data)
-            node._save_strokes()    # ← save strokes to disk
+            node._save_strokes()
             node._log(f"Stroke accepted and replicated to {committed} nodes ✓")
 
         return jsonify({"success": True, "stroke": stroke_data, "replicated_to": committed})
@@ -245,6 +291,26 @@ def create_app(node):
     def get_strokes():
         with node.lock:
             return jsonify({"strokes": node.stroke_log})
+
+    @app.route("/election_history", methods=["GET"])
+    def election_history():
+        with node.lock:
+            return jsonify({"elections": node.election_history})
+
+    @app.route("/shutdown", methods=["POST"])
+    def shutdown():
+        import signal
+        node._log("Shutting down via visualiser...")
+        threading.Thread(
+            target=lambda: (time.sleep(0.5), os.kill(os.getpid(), signal.SIGTERM))
+        ).start()
+        return jsonify({"success": True, "message": f"Node {node.id} shutting down"})
+
+    @app.route("/")
+    def visualiser():
+        html_path = os.path.join(os.path.dirname(__file__), "visualiser.html")
+        with open(html_path, "r", encoding="utf-8") as f:
+            return f.read()
 
     @app.route("/status", methods=["GET"])
     def status():
