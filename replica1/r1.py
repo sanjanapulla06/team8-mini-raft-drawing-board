@@ -9,15 +9,15 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 ALL_PEERS = {
-    1: "http://localhost:5001",
-    2: "http://localhost:5002",
-    3: "http://localhost:5003",
+    1: os.environ.get("REPLICA1_URL", "http://localhost:5001"),
+    2: os.environ.get("REPLICA2_URL", "http://localhost:5002"),
+    3: os.environ.get("REPLICA3_URL", "http://localhost:5003"),
 }
 
-HEARTBEAT_INTERVAL   = 1.0
-ELECTION_TIMEOUT_MIN = 5.0
-ELECTION_TIMEOUT_MAX = 10.0
-LOGS_DIR             = "../logs"
+HEARTBEAT_INTERVAL   = 0.5
+ELECTION_TIMEOUT_MIN = 3.0
+ELECTION_TIMEOUT_MAX = 6.0
+LOGS_DIR             = os.environ.get("LOGS_DIR", "../logs")
 
 
 class RaftNode:
@@ -33,6 +33,7 @@ class RaftNode:
         self.last_heartbeat   = time.time()
         self.election_timeout = self._new_timeout()
         self.lock             = threading.Lock()
+        self.missed_heartbeats = 0
 
         os.makedirs(LOGS_DIR, exist_ok=True)
 
@@ -122,7 +123,8 @@ class RaftNode:
 
         for peer_url in self.peers.values():
             try:
-                resp = requests.post(f"{peer_url}/request_vote",
+                # FIX 1: underscore → hyphen
+                resp = requests.post(f"{peer_url}/request-vote",
                     json={"term": term, "candidate_id": self.id}, timeout=1.5)
                 data = resp.json()
                 if data.get("term", 0) > self.current_term:
@@ -172,7 +174,8 @@ class RaftNode:
             responses = 0
             for peer_url in self.peers.values():
                 try:
-                    r = requests.post(f"{peer_url}/append_entries",
+                    # FIX 2: append_entries → heartbeat
+                    r = requests.post(f"{peer_url}/heartbeat",
                         json={"term": term, "leader_id": lid}, timeout=1.0)
                     if r.json().get("success"):
                         responses += 1
@@ -249,12 +252,14 @@ def create_app(node):
     app = Flask(__name__)
     CORS(app)
 
-    @app.route("/request_vote", methods=["POST"])
+    # FIX 3: /request_vote → /request-vote
+    @app.route("/request-vote", methods=["POST"])
     def request_vote():
         d = request.json
         return jsonify(node.handle_request_vote(d["term"], d["candidate_id"]))
 
-    @app.route("/append_entries", methods=["POST"])
+    # FIX 4: /append_entries → /append-entries
+    @app.route("/append-entries", methods=["POST"])
     def append_entries():
         d = request.json
         return jsonify(node.handle_append_entries(d["term"], d["leader_id"], d.get("stroke")))
@@ -272,7 +277,7 @@ def create_app(node):
         committed = 0
         for peer_url in node.peers.values():
             try:
-                r = requests.post(f"{peer_url}/append_entries",
+                r = requests.post(f"{peer_url}/append-entries",
                     json={"term": term, "leader_id": leader_id, "stroke": stroke_data},
                     timeout=1.0)
                 if r.json().get("success"):
@@ -332,4 +337,4 @@ if __name__ == "__main__":
     print(f"  RAFT Node {args.id} starting on port {args.port}")
     print(f"{'='*50}\n")
 
-    app.run(port=args.port, threaded=True)
+    app.run(host="0.0.0.0", port=args.port, threaded=True)
