@@ -4,24 +4,6 @@ networks:
 
 services:
 
-  gateway:
-    build: ./gateway
-    container_name: gateway
-    ports:
-      - "8081:8080"
-    environment:
-      - PORT=8080
-      - REPLICA1_URL=http://replica1:5001
-      - REPLICA2_URL=http://replica2:5002
-      - REPLICA3_URL=http://replica3:5003
-    depends_on:
-      - replica1
-      - replica2
-      - replica3
-    networks:
-      - raft-net
-    restart: unless-stopped
-
   replica1:
     build: ./replica1
     container_name: replica1
@@ -30,7 +12,6 @@ services:
     environment:
       - REPLICA_ID=replica1
       - PORT=5001
-      - GATEWAY_URL=http://gateway:8080
       - REPLICA1_URL=http://replica1:5001
       - REPLICA2_URL=http://replica2:5002
       - REPLICA3_URL=http://replica3:5003
@@ -46,7 +27,6 @@ services:
     environment:
       - REPLICA_ID=replica2
       - PORT=5002
-      - GATEWAY_URL=http://gateway:8080
       - REPLICA1_URL=http://replica1:5001
       - REPLICA2_URL=http://replica2:5002
       - REPLICA3_URL=http://replica3:5003
@@ -62,7 +42,6 @@ services:
     environment:
       - REPLICA_ID=replica3
       - PORT=5003
-      - GATEWAY_URL=http://gateway:8080
       - REPLICA1_URL=http://replica1:5001
       - REPLICA2_URL=http://replica2:5002
       - REPLICA3_URL=http://replica3:5003

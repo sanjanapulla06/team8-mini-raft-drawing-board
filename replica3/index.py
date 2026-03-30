@@ -157,8 +157,9 @@ app.register_blueprint(blueprint)
 from r1 import create_app as sharon_create_app
 sharon_app = sharon_create_app(raft_node)
 
-# Copy Sharon's routes into our app (avoid duplicate /stroke and /status)
-SHARON_ROUTES_TO_SKIP = {"/stroke", "/status", "/append_entries"}
+# Copy Sharon's routes into our app (avoid duplicate /stroke, /status,
+# /append_entries, and /get_strokes which are now handled by Shrivadhu's blueprint)
+SHARON_ROUTES_TO_SKIP = {"/stroke", "/status", "/append_entries", "/get_strokes"}
 for rule in sharon_app.url_map.iter_rules():
     if rule.rule in SHARON_ROUTES_TO_SKIP:
         continue

@@ -150,6 +150,7 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         return jsonify({
             "replicaId":   state.replica_id,
             "role":        state.role,
+            "state":       state.role,   # ← added for gateway compatibility
             "term":        state.current_term,
             "leaderId":    state.leader_id,
             "logLength":   log.length,
@@ -168,5 +169,12 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         entry       = log.append(state.current_term, stroke_data)
         replicate_entry(state, log, election_mgr.peers, entry, on_stroke_committed)
         return jsonify({"success": True, "index": entry["index"]})
+
+
+    # ── GET /get_strokes ──────────────────────────────────────────────────────
+    @rpc.route("/get_strokes", methods=["GET"])
+    def get_strokes():
+        return jsonify({"strokes": [e["stroke"] for e in log.committed_entries()]})
+
 
     return rpc
