@@ -7,6 +7,7 @@ import requests
 import threading
 import time
 from typing import Any, Optional, Set
+from starlette.websockets import WebSocketState
 
 app = FastAPI()
 
@@ -31,7 +32,35 @@ leader_epoch = 0
 leader_lock = threading.Lock()
 replication_poller_task: Optional[asyncio.Task] = None
 leader_miss_count = 0
-LEADER_MISS_THRESHOLD = 3
+LEADER_MISS_THRESHOLD = 6
+leader_failure_count = 0
+LEADER_FAILURE_THRESHOLD = 5
+
+STATUS_TIMEOUT_SECONDS = 2.0
+GET_TIMEOUT_SECONDS = 2.5
+POST_TIMEOUT_SECONDS = 4.0
+HTTP_RETRY_ATTEMPTS = 3
+HTTP_RETRY_BACKOFF_SECONDS = 0.25
+WS_KEEPALIVE_INTERVAL_SECONDS = 15.0
+WS_KEEPALIVE_PAYLOAD = json.dumps({"type": "ping"})
+
+# Bonus: observability globals
+leader_history: list[dict[str, Any]] = []
+stroke_count = 0
+gateway_start_time = time.time()
+
+
+def _stroke_log_fields(stroke: Any) -> str:
+    if not isinstance(stroke, dict):
+        return f"payload={stroke}"
+
+    return (
+        f"type={stroke.get('type')} "
+        f"x={stroke.get('x')} y={stroke.get('y')} "
+        f"x0={stroke.get('x0')} y0={stroke.get('y0')} "
+        f"color={stroke.get('color')} size={stroke.get('size')} "
+        f"erase={stroke.get('erase')}"
+    )
 
 
 def _to_int(value: Any, default: int) -> int:
@@ -42,14 +71,14 @@ def _to_int(value: Any, default: int) -> int:
 
 
 def find_leader():
-    global current_leader, leader_epoch, leader_miss_count
+    global current_leader, leader_epoch, leader_miss_count, leader_failure_count
     while True:
         discovered_leader: Optional[str] = None
         leader_candidates: list[tuple[int, int, str]] = []
 
         for url in REPLICA_URLS:
             try:
-                r = requests.get(f"{url}/status", timeout=1.0)
+                r = requests.get(f"{url}/status", timeout=STATUS_TIMEOUT_SECONDS)
                 data = r.json()
                 is_leader = (
                     data.get("state") == "leader" or
@@ -76,8 +105,19 @@ def find_leader():
         with leader_lock:
             if discovered_leader != current_leader:
                 print(f"[GATEWAY] Leader changed: {current_leader} -> {discovered_leader}")
+                leader_history.append(
+                    {
+                        "from": current_leader,
+                        "to": discovered_leader,
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    }
+                )
                 current_leader = discovered_leader
                 leader_epoch += 1
+                leader_failure_count = 0
+            elif discovered_leader is not None:
+                # Any healthy status response for the current leader clears transient failure debt.
+                leader_failure_count = 0
 
         if discovered_leader is None:
             print("[GATEWAY] No leader found, waiting for election...")
@@ -92,25 +132,69 @@ def get_leader_snapshot() -> tuple[Optional[str], int]:
         return current_leader, leader_epoch
 
 
-def clear_leader_if_matches(url: str) -> None:
-    global current_leader, leader_epoch
+def mark_leader_failure(url: str, *, hard: bool = False) -> None:
+    global current_leader, leader_epoch, leader_failure_count
+    with leader_lock:
+        if current_leader != url:
+            return
+
+        increment = LEADER_FAILURE_THRESHOLD if hard else 1
+        leader_failure_count += increment
+
+        if leader_failure_count < LEADER_FAILURE_THRESHOLD:
+            return
+
+        print(f"[GATEWAY] Clearing unstable leader after failures: {url}")
+        current_leader = None
+        leader_epoch += 1
+        leader_failure_count = 0
+
+
+def mark_leader_success(url: str) -> None:
+    global leader_failure_count
     with leader_lock:
         if current_leader == url:
-            print(f"[GATEWAY] Clearing unreachable leader: {url}")
-            current_leader = None
-            leader_epoch += 1
+            leader_failure_count = 0
 
 
-async def _http_get_json(url: str, timeout: float = 1.0) -> dict[str, Any]:
-    response = await asyncio.to_thread(requests.get, url, timeout=timeout)
-    response.raise_for_status()
-    return response.json()
+async def _http_get_json(url: str, timeout: float = GET_TIMEOUT_SECONDS) -> dict[str, Any]:
+    last_exception: Optional[Exception] = None
+    for attempt in range(1, HTTP_RETRY_ATTEMPTS + 1):
+        try:
+            response = await asyncio.to_thread(requests.get, url, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            last_exception = exc
+            if attempt < HTTP_RETRY_ATTEMPTS:
+                await asyncio.sleep(HTTP_RETRY_BACKOFF_SECONDS * attempt)
+    if last_exception is not None:
+        raise last_exception
+    raise RuntimeError("GET request failed without exception")
 
 
-async def _http_post_json(url: str, payload: dict[str, Any], timeout: float = 1.0) -> dict[str, Any]:
-    response = await asyncio.to_thread(requests.post, url, json=payload, timeout=timeout)
-    response.raise_for_status()
-    return response.json()
+async def _http_post_json(url: str, payload: dict[str, Any], timeout: float = POST_TIMEOUT_SECONDS) -> dict[str, Any]:
+    last_exception: Optional[Exception] = None
+    for attempt in range(1, HTTP_RETRY_ATTEMPTS + 1):
+        try:
+            response = await asyncio.to_thread(requests.post, url, json=payload, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+        except Exception as exc:
+            last_exception = exc
+            if attempt < HTTP_RETRY_ATTEMPTS:
+                await asyncio.sleep(HTTP_RETRY_BACKOFF_SECONDS * attempt)
+    if last_exception is not None:
+        raise last_exception
+    raise RuntimeError("POST request failed without exception")
+
+
+async def _websocket_keepalive_loop(ws: WebSocket) -> None:
+    while True:
+        await asyncio.sleep(WS_KEEPALIVE_INTERVAL_SECONDS)
+        sent = await _safe_send_text(ws, WS_KEEPALIVE_PAYLOAD)
+        if not sent:
+            return
 
 
 async def register_client(ws: WebSocket) -> None:
@@ -121,6 +205,23 @@ async def register_client(ws: WebSocket) -> None:
 async def unregister_client(ws: WebSocket) -> None:
     async with clients_lock:
         clients.discard(ws)
+
+
+def _is_ws_connected(ws: WebSocket) -> bool:
+    return (
+        ws.client_state == WebSocketState.CONNECTED and
+        ws.application_state == WebSocketState.CONNECTED
+    )
+
+
+async def _safe_send_text(ws: WebSocket, payload: str) -> bool:
+    if not _is_ws_connected(ws):
+        return False
+    try:
+        await ws.send_text(payload)
+        return True
+    except Exception:
+        return False
 
 
 async def broadcast_strokes(strokes: list[Any]) -> None:
@@ -137,15 +238,14 @@ async def broadcast_strokes(strokes: list[Any]) -> None:
         payload = json.dumps(stroke)
         dead_clients: list[WebSocket] = []
         for client in client_list:
-            try:
-                await client.send_text(payload)
-            except Exception:
+            if not await _safe_send_text(client, payload):
                 dead_clients.append(client)
 
         if dead_clients:
             async with clients_lock:
                 for dead in dead_clients:
                     clients.discard(dead)
+            client_list = [client for client in client_list if client not in dead_clients]
 
 
 async def send_current_snapshot(ws: WebSocket) -> None:
@@ -154,37 +254,65 @@ async def send_current_snapshot(ws: WebSocket) -> None:
         return
 
     try:
-        strokes_response = await _http_get_json(f"{leader}/get_strokes", timeout=1.0)
+        strokes_response = await _http_get_json(f"{leader}/get_strokes", timeout=GET_TIMEOUT_SECONDS)
     except Exception:
-        clear_leader_if_matches(leader)
+        mark_leader_failure(leader)
         return
+
+    mark_leader_success(leader)
 
     strokes = strokes_response.get("strokes", [])
     for stroke in strokes:
-        await ws.send_text(json.dumps(stroke))
+        sent = await _safe_send_text(ws, json.dumps(stroke))
+        if not sent:
+            await unregister_client(ws)
+            return
 
 
 async def forward_stroke_to_leader(stroke: Any) -> bool:
+    global stroke_count
     leader, _ = get_leader_snapshot()
     if leader is None:
         return False
 
     try:
-        result = await _http_post_json(f"{leader}/stroke", {"stroke": stroke}, timeout=1.0)
+        result = await _http_post_json(f"{leader}/stroke", {"stroke": stroke}, timeout=POST_TIMEOUT_SECONDS)
     except Exception:
-        clear_leader_if_matches(leader)
+        mark_leader_failure(leader)
         return False
 
     if result.get("success") is not True:
-        clear_leader_if_matches(leader)
+        mark_leader_failure(leader, hard=(result.get("error") == "not leader"))
         return False
 
+    mark_leader_success(leader)
+    stroke_count += 1
     return True
+
+
+def _normalize_incoming_strokes(data: Any) -> list[Any]:
+    items = data if isinstance(data, list) else [data]
+    normalized: list[Any] = []
+
+    for item in items:
+        payload = item.get("stroke", item) if isinstance(item, dict) else item
+        if payload is None:
+            continue
+
+        if isinstance(payload, list):
+            for inner in payload:
+                if inner is not None:
+                    normalized.append(inner)
+        else:
+            normalized.append(payload)
+
+    return normalized
 
 
 async def poll_and_broadcast_committed_strokes() -> None:
     last_seen_epoch = -1
     last_sent_index = 0
+    last_sent_index_by_leader: dict[str, int] = {}
 
     while True:
         leader, epoch = get_leader_snapshot()
@@ -195,14 +323,24 @@ async def poll_and_broadcast_committed_strokes() -> None:
 
         if epoch != last_seen_epoch:
             last_seen_epoch = epoch
-            last_sent_index = 0
+            last_sent_index = last_sent_index_by_leader.get(leader, 0)
 
         try:
-            strokes_response = await _http_get_json(f"{leader}/get_strokes", timeout=1.0)
+            strokes_response = await _http_get_json(f"{leader}/get_strokes", timeout=GET_TIMEOUT_SECONDS)
             strokes = strokes_response.get("strokes", [])
         except Exception:
-            clear_leader_if_matches(leader)
+            mark_leader_failure(leader)
             await asyncio.sleep(0.3)
+            continue
+
+        mark_leader_success(leader)
+
+        if leader not in last_sent_index_by_leader:
+            # On first observation of a leader, treat existing committed strokes as baseline.
+            # New clients already receive a snapshot via send_current_snapshot().
+            last_sent_index = len(strokes)
+            last_sent_index_by_leader[leader] = last_sent_index
+            await asyncio.sleep(0.2)
             continue
 
         if len(strokes) < last_sent_index:
@@ -211,8 +349,13 @@ async def poll_and_broadcast_committed_strokes() -> None:
         new_strokes = strokes[last_sent_index:]
         if new_strokes:
             print(f"[GATEWAY] Broadcasting {len(new_strokes)} committed stroke(s)")
+            for index, stroke in enumerate(new_strokes, start=1):
+                print(f"[GATEWAY] committed[{index}/{len(new_strokes)}] {_stroke_log_fields(stroke)}")
             await broadcast_strokes(new_strokes)
             last_sent_index = len(strokes)
+            last_sent_index_by_leader[leader] = last_sent_index
+        else:
+            last_sent_index_by_leader[leader] = len(strokes)
 
         await asyncio.sleep(0.2)
 
@@ -237,9 +380,14 @@ async def on_shutdown() -> None:
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
-    await register_client(ws)
     await send_current_snapshot(ws)
+    if not _is_ws_connected(ws):
+        await unregister_client(ws)
+        return
+
+    await register_client(ws)
     print("[GATEWAY] Client connected")
+    keepalive_task = asyncio.create_task(_websocket_keepalive_loop(ws))
 
     try:
         while True:
@@ -247,22 +395,53 @@ async def websocket_endpoint(ws: WebSocket):
             try:
                 data = json.loads(raw_data)
             except json.JSONDecodeError:
-                await ws.send_text(json.dumps({"error": "invalid json"}))
+                sent = await _safe_send_text(ws, json.dumps({"error": "invalid json"}))
+                if not sent:
+                    break
                 continue
 
             print("[GATEWAY] Received stroke:", data)
 
-            stroke_payload = data.get("stroke", data) if isinstance(data, dict) else data
-            forwarded = await forward_stroke_to_leader(stroke_payload)
+            if isinstance(data, dict) and data.get("type") in {"ping", "pong", "keepalive"}:
+                if data.get("type") == "ping":
+                    sent = await _safe_send_text(ws, json.dumps({"type": "pong"}))
+                    if not sent:
+                        break
+                continue
+
+            stroke_payloads = _normalize_incoming_strokes(data)
+            if not stroke_payloads:
+                sent = await _safe_send_text(ws, json.dumps({"error": "empty payload"}))
+                if not sent:
+                    break
+                continue
+
+            forwarded = True
+            for stroke_payload in stroke_payloads:
+                if not await forward_stroke_to_leader(stroke_payload):
+                    forwarded = False
+                    break
+
             if not forwarded:
-                await ws.send_text(json.dumps({"error": "no leader available"}))
+                sent = await _safe_send_text(ws, json.dumps({"error": "no leader available"}))
+                if not sent:
+                    break
 
     except WebSocketDisconnect:
-        await unregister_client(ws)
         print("[GATEWAY] Client disconnected")
+    except RuntimeError as exc:
+        # Starlette may raise a RuntimeError during close races.
+        if "not connected" in str(exc).lower() or "accept" in str(exc).lower():
+            print("[GATEWAY] Client disconnected")
+        else:
+            print(f"[GATEWAY] Client connection error: {exc}")
     except Exception as exc:
-        await unregister_client(ws)
         print(f"[GATEWAY] Client connection error: {exc}")
+    finally:
+        keepalive_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await keepalive_task
+        await unregister_client(ws)
 
 
 @app.get("/")
@@ -288,10 +467,29 @@ def leader():
     return {"leader": current, "epoch": epoch}
 
 
+@app.get("/stats")
+def stats():
+    leader, epoch = get_leader_snapshot()
+    return {
+        "uptime_seconds": round(time.time() - gateway_start_time),
+        "leader": leader,
+        "leader_epoch": epoch,
+        "connected_clients": len(clients),
+        "total_strokes_forwarded": stroke_count,
+        "replica_urls": REPLICA_URLS,
+        "total_leader_changes": len(leader_history),
+    }
+
+
+@app.get("/history")
+def history():
+    return {"leader_changes": leader_history}
+
+
 @app.post("/committed")
 async def committed(data: dict[str, Any]):
     stroke = data.get("stroke")
     if stroke is not None:
-        print("[GATEWAY] Commit pushed from replica")
+        print(f"[GATEWAY] Commit pushed from replica {_stroke_log_fields(stroke)}")
         await broadcast_strokes([stroke])
     return {"status": "ok"}
