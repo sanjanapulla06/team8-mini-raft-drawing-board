@@ -13,6 +13,7 @@ ALL_PEERS = {
     1: os.environ.get("REPLICA1_URL", "http://localhost:5001"),
     2: os.environ.get("REPLICA2_URL", "http://localhost:5002"),
     3: os.environ.get("REPLICA3_URL", "http://localhost:5003"),
+    4: os.environ.get("REPLICA4_URL", "http://localhost:5004"),  # <<< NEW REPLICA 4
 }
 
 # ── Timeouts and logs ──
@@ -78,7 +79,7 @@ class RaftNode:
 
     # ── Save / Load election history ──
     def _save_election_history(self, record):
-        path = f"{LOGS_DIR}/election_history.json"
+        path = f"{LOGS_DIR}/election_history_node{self.id}.json"  # node-specific
         try:
             with open(path, "r") as f:
                 all_history = json.load(f)
@@ -89,13 +90,13 @@ class RaftNode:
             json.dump(all_history, f, indent=2)
 
     def _load_election_history(self):
-        path = f"{LOGS_DIR}/election_history.json"
+        path = f"{LOGS_DIR}/election_history_node{self.id}.json"  # node-specific
         try:
             with open(path, "r") as f:
                 self.election_history = json.load(f)
                 self._log(f"Loaded {len(self.election_history)} past elections from logs")
         except FileNotFoundError:
-            pass
+            self.election_history = []
 
     def _new_timeout(self):
         return random.uniform(ELECTION_TIMEOUT_MIN, ELECTION_TIMEOUT_MAX)
