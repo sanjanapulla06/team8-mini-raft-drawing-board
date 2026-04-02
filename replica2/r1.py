@@ -1,19 +1,21 @@
+import os
 import argparse
 import threading
 import time
 import random
 import json
-import os
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+# ── Peer configuration ──
 ALL_PEERS = {
     1: os.environ.get("REPLICA1_URL", "http://localhost:5001"),
     2: os.environ.get("REPLICA2_URL", "http://localhost:5002"),
     3: os.environ.get("REPLICA3_URL", "http://localhost:5003"),
 }
 
+# ── Timeouts and logs ──
 HEARTBEAT_INTERVAL   = 0.5
 ELECTION_TIMEOUT_MIN = 3.0
 ELECTION_TIMEOUT_MAX = 6.0
@@ -42,6 +44,7 @@ class RaftNode:
         self._load_election_history()
         threading.Thread(target=self._election_loop, daemon=True).start()
 
+    # ── Save / Load state ──
     def _save_state(self):
         path = f"{LOGS_DIR}/state_node{self.id}.json"
         with open(path, "w") as f:
@@ -58,6 +61,7 @@ class RaftNode:
         except FileNotFoundError:
             pass
 
+    # ── Save / Load strokes ──
     def _save_strokes(self):
         path = f"{LOGS_DIR}/strokes_node{self.id}.json"
         with open(path, "w") as f:
@@ -72,6 +76,7 @@ class RaftNode:
         except FileNotFoundError:
             pass
 
+    # ── Save / Load election history ──
     def _save_election_history(self, record):
         path = f"{LOGS_DIR}/election_history.json"
         try:
@@ -98,6 +103,7 @@ class RaftNode:
     def _log(self, msg):
         print(f"[Node {self.id} | {self.state.upper():9s} | term {self.current_term}]  {msg}", flush=True)
 
+    # ── Election & heartbeat loops ──
     def _election_loop(self):
         while True:
             time.sleep(0.5)
@@ -123,9 +129,8 @@ class RaftNode:
 
         for peer_url in self.peers.values():
             try:
-                # FIX 1: underscore → hyphen
                 resp = requests.post(f"{peer_url}/request-vote",
-                    json={"term": term, "candidate_id": self.id}, timeout=1.5)
+                                     json={"term": term, "candidate_id": self.id}, timeout=1.5)
                 data = resp.json()
                 if data.get("term", 0) > self.current_term:
                     self._step_down(data["term"]); return
@@ -174,9 +179,8 @@ class RaftNode:
             responses = 0
             for peer_url in self.peers.values():
                 try:
-                    # FIX 2: append_entries → heartbeat
-                    r = requests.post(f"{peer_url}/heartbeat",
-                        json={"term": term, "leader_id": lid}, timeout=1.0)
+                    r = requests.post(f"{peer_url}/append-entries",
+                                      json={"term": term, "leader_id": lid}, timeout=1.0)
                     if r.json().get("success"):
                         responses += 1
                 except Exception:
@@ -209,6 +213,7 @@ class RaftNode:
         self.election_timeout = self._new_timeout()
         self._save_state()
 
+    # ── Request handlers ──
     def handle_request_vote(self, term, candidate_id):
         with self.lock:
             if term < self.current_term:
@@ -247,18 +252,16 @@ class RaftNode:
             return {"id": self.id, "state": self.state,
                     "term": self.current_term, "leader": self.leader_id}
 
-
+# ── Flask App ──
 def create_app(node):
     app = Flask(__name__)
     CORS(app)
 
-    # FIX 3: /request_vote → /request-vote
     @app.route("/request-vote", methods=["POST"])
     def request_vote():
         d = request.json
         return jsonify(node.handle_request_vote(d["term"], d["candidate_id"]))
 
-    # FIX 4: /append_entries → /append-entries
     @app.route("/append-entries", methods=["POST"])
     def append_entries():
         d = request.json
@@ -278,8 +281,8 @@ def create_app(node):
         for peer_url in node.peers.values():
             try:
                 r = requests.post(f"{peer_url}/append-entries",
-                    json={"term": term, "leader_id": leader_id, "stroke": stroke_data},
-                    timeout=1.0)
+                                  json={"term": term, "leader_id": leader_id, "stroke": stroke_data},
+                                  timeout=1.0)
                 if r.json().get("success"):
                     committed += 1
             except Exception:
@@ -306,9 +309,7 @@ def create_app(node):
     def shutdown():
         import signal
         node._log("Shutting down via visualiser...")
-        threading.Thread(
-            target=lambda: (time.sleep(0.5), os.kill(os.getpid(), signal.SIGTERM))
-        ).start()
+        threading.Thread(target=lambda: (time.sleep(0.5), os.kill(os.getpid(), signal.SIGTERM))).start()
         return jsonify({"success": True, "message": f"Node {node.id} shutting down"})
 
     @app.route("/")
