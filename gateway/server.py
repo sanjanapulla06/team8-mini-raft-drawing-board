@@ -249,24 +249,42 @@ async def broadcast_strokes(strokes: list[Any]) -> None:
 
 
 async def send_current_snapshot(ws: WebSocket) -> None:
+    # Wait up to 3 seconds for a leader to be elected
     leader, _ = get_leader_snapshot()
     if leader is None:
-        return
+        print("[GATEWAY] No leader available, waiting for election...")
+        for attempt in range(30):  # 30 * 0.1 = 3 seconds
+            await asyncio.sleep(0.1)
+            leader, _ = get_leader_snapshot()
+            if leader is not None:
+                print(f"[GATEWAY] Leader elected at attempt {attempt + 1}: {leader}")
+                break
+        if leader is None:
+            print("[GATEWAY] Timeout waiting for leader, sending empty snapshot")
+            # Send empty snapshot so client is at least ready
+            await _safe_send_text(ws, json.dumps({"type": "snapshot-reset"}))
+            return
 
     try:
         strokes_response = await _http_get_json(f"{leader}/get_strokes", timeout=GET_TIMEOUT_SECONDS)
-    except Exception:
+    except Exception as e:
+        print(f"[GATEWAY] Failed to get strokes from leader: {e}")
         mark_leader_failure(leader)
         return
 
     mark_leader_success(leader)
 
     strokes = strokes_response.get("strokes", [])
-    for stroke in strokes:
-        sent = await _safe_send_text(ws, json.dumps(stroke))
-        if not sent:
-            await unregister_client(ws)
-            return
+    payload = {
+        "type": "snapshot",
+        "strokes": strokes,
+    }
+
+    sent = await _safe_send_text(ws, json.dumps(payload))
+    if not sent:
+        return
+
+    print(f"[GATEWAY] Snapshot sent to new client ({len(strokes)} strokes)")
 
 
 async def forward_stroke_to_leader(stroke: Any) -> bool:
@@ -380,13 +398,15 @@ async def on_shutdown() -> None:
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
+    
+    # Send snapshot BEFORE registering for live broadcasts
     await send_current_snapshot(ws)
     if not _is_ws_connected(ws):
-        await unregister_client(ws)
         return
 
+    # NOW register for live updates after snapshot is complete
     await register_client(ws)
-    print("[GATEWAY] Client connected")
+    print("[GATEWAY] Client registered and ready for live updates")
     keepalive_task = asyncio.create_task(_websocket_keepalive_loop(ws))
 
     try:
