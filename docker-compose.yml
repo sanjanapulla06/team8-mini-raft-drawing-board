@@ -1,0 +1,50 @@
+networks:
+  raft-net:
+    driver: bridge
+
+services:
+
+  replica1:
+    build: ./replica1
+    container_name: replica1
+    ports:
+      - "5001:5001"
+    environment:
+      - REPLICA_ID=replica1
+      - PORT=5001
+      - REPLICA1_URL=http://replica1:5001
+      - REPLICA2_URL=http://replica2:5002
+      - REPLICA3_URL=http://replica3:5003
+    networks:
+      - raft-net
+    restart: unless-stopped
+
+  replica2:
+    build: ./replica2
+    container_name: replica2
+    ports:
+      - "5002:5002"
+    environment:
+      - REPLICA_ID=replica2
+      - PORT=5002
+      - REPLICA1_URL=http://replica1:5001
+      - REPLICA2_URL=http://replica2:5002
+      - REPLICA3_URL=http://replica3:5003
+    networks:
+      - raft-net
+    restart: unless-stopped
+
+  replica3:
+    build: ./replica3
+    container_name: replica3
+    ports:
+      - "5003:5003"
+    environment:
+      - REPLICA_ID=replica3
+      - PORT=5003
+      - REPLICA1_URL=http://replica1:5001
+      - REPLICA2_URL=http://replica2:5002
+      - REPLICA3_URL=http://replica3:5003
+    networks:
+      - raft-net
+    restart: unless-stopped
