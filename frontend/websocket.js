@@ -305,7 +305,11 @@ const WS = (function ()
 
     const logId = Logger.strokeSent(data);
     pendingRTT[_fingerprint(msg)] = logId;
-    try { socket.send(JSON.stringify(msg)); }
+    try 
+      { socket.send(JSON.stringify({
+        stroke: msg
+      }));
+    }
     catch (e) { Logger.error('socket.send() failed', e.message); }
   }
 
