@@ -14,7 +14,7 @@
   <div id="cursorLayer"></div>
   <div id="toastContainer"></div>
 
-  <!-- name modal-->
+  <!-- Name modal-->
   <div class="name-modal-bg" id="nameModalBg">
     <div class="name-modal">
       <h2>Welcome to RAFT Board</h2>
@@ -24,7 +24,7 @@
     </div>
   </div>
 
-  <!--main -->
+  <!-- main app-->
   <div class="app-shell" id="appView" style="display:none">
 
     <header class="topbar">
@@ -47,19 +47,17 @@
       </div>
 
       <div class="topbar-right">
+        <button class="theme-toggle" id="btnTheme" title="Toggle dark/light mode">🌿</button>
         <div class="peer-avatars" id="peerAvatars"></div>
-
-        <!-- Name change button -->
         <button class="topbar-btn" id="btnChangeName" title="Change your name">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 13a4 4 0 100-8 4 4 0 000 8z"/><path d="M2 17c0-2.2 3.6-4 8-4s8 1.8 8 4"/></svg>
           <span id="myNameLabel">You</span>
         </button>
-
-        <button class="topbar-btn" id="btnDownload" title="Download canvas (Ctrl+S)">
+        <button class="topbar-btn" id="btnDownload" title="Download canvas">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 3v9M6 8l4 4 4-4"/><path d="M3 15v1a1 1 0 001 1h12a1 1 0 001-1v-1"/></svg>
           Download
         </button>
-        <button class="topbar-btn accent" id="btnOpenLogs" title="View logs">
+        <button class="topbar-btn accent" id="btnOpenLogs">
           <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="14" height="14" rx="2"/><path d="M7 7h6M7 10h4M7 13h5"/></svg>
           Logs
         </button>
@@ -69,24 +67,25 @@
     <div class="workspace">
       <aside class="sidebar">
 
+        <!-- colors -->
         <section class="tool-section">
           <span class="tool-label">Colour</span>
           <div class="swatches" id="swatches">
-            <button class="swatch active" data-color="#93c5fd" style="--c:#93c5fd"></button>
-            <button class="swatch" data-color="#60a5fa" style="--c:#60a5fa"></button>
-            <button class="swatch" data-color="#3b82f6" style="--c:#3b82f6"></button>
-            <button class="swatch" data-color="#a5f3fc" style="--c:#a5f3fc"></button>
-            <button class="swatch" data-color="#6ee7b7" style="--c:#6ee7b7"></button>
-            <button class="swatch" data-color="#c4b5fd" style="--c:#c4b5fd"></button>
-            <button class="swatch" data-color="#f9a8d4" style="--c:#f9a8d4"></button>
-            <button class="swatch" data-color="#fde68a" style="--c:#fde68a"></button>
-            <button class="swatch" data-color="#fb923c" style="--c:#fb923c"></button>
-            <button class="swatch" data-color="#f1f5f9" style="--c:#f1f5f9;border:1.5px solid #cbd5e1"></button>
-            <button class="swatch" data-color="#64748b" style="--c:#64748b"></button>
-            <button class="swatch" data-color="#0f172a" style="--c:#0f172a"></button>
+            <button class="swatch active" data-color="#7a9e6e" style="--c:#7a9e6e"></button>
+            <button class="swatch" data-color="#5a8a5e" style="--c:#5a8a5e"></button>
+            <button class="swatch" data-color="#3d6b42" style="--c:#3d6b42"></button>
+            <button class="swatch" data-color="#a8c5a0" style="--c:#a8c5a0"></button>
+            <button class="swatch" data-color="#c97b5a" style="--c:#c97b5a"></button>
+            <button class="swatch" data-color="#8b4513" style="--c:#8b4513"></button>
+            <button class="swatch" data-color="#d4a853" style="--c:#d4a853"></button>
+            <button class="swatch" data-color="#b8860b" style="--c:#b8860b"></button>
+            <button class="swatch" data-color="#8b6b47" style="--c:#8b6b47"></button>
+            <button class="swatch" data-color="#f5f0e8" style="--c:#f5f0e8;border:1.5px solid #c4a97e"></button>
+            <button class="swatch" data-color="#5a3e28" style="--c:#5a3e28"></button>
+            <button class="swatch" data-color="#1a1008" style="--c:#1a1008"></button>
           </div>
           <label class="custom-color-wrap" title="Custom colour">
-            <input type="color" id="colorPicker" value="#93c5fd" />
+            <input type="color" id="colorPicker" value="#7a9e6e" />
             <span class="custom-color-label">
               <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="8" cy="8" r="6"/><path d="M8 5v6M5 8h6"/></svg>
               Custom
@@ -97,6 +96,7 @@
 
         <div class="divider"></div>
 
+        <!-- size-->
         <section class="tool-section">
           <span class="tool-label">Size</span>
           <div class="size-btns" id="sizeBtns">
@@ -109,22 +109,67 @@
 
         <div class="divider"></div>
 
+        <!-- brushes -->
         <section class="tool-section">
-          <span class="tool-label">Tool</span>
-          <div class="tool-btns">
-            <button class="tool-btn active" id="btnDraw">
+          <span class="tool-label">Brush</span>
+          <div class="tool-grid" id="brushBtns">
+            <button class="tool-btn active" data-brush="pen">
               <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 2.5a2.12 2.12 0 013 3L6 17l-4 1 1-4L14 2.5z"/></svg>
-              Draw
+              Pen
             </button>
-            <button class="tool-btn" id="btnErase">
-              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 16H7L3 12l9-9 5 5-3 3"/><path d="M5 15l2-2"/></svg>
-              Erase
+            <button class="tool-btn" data-brush="pencil">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 16l2-6L14 2l4 4-8 8-6 2z"/><path d="M14 2l4 4"/></svg>
+              Pencil
+            </button>
+            <button class="tool-btn" data-brush="marker">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="8" y="2" width="5" height="12" rx="2"/><path d="M10.5 14v4"/></svg>
+              Marker
+            </button>
+            <button class="tool-btn" data-brush="highlighter">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 13l3 3L16 6l-3-3L5 13z"/><path d="M5 13l-2 4 4-2"/></svg>
+              Hi-lite
             </button>
           </div>
         </section>
 
         <div class="divider"></div>
 
+        <!-- shapes -->
+        <section class="tool-section">
+          <span class="tool-label">Shapes</span>
+          <div class="tool-grid" id="shapeBtns">
+            <button class="tool-btn" data-shape="line">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><line x1="3" y1="17" x2="17" y2="3"/></svg>
+              Line
+            </button>
+            <button class="tool-btn" data-shape="rect">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="14" height="14" rx="2"/></svg>
+              Rect
+            </button>
+            <button class="tool-btn" data-shape="circle">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="10" cy="10" r="7"/></svg>
+              Circle
+            </button>
+            <button class="tool-btn" data-shape="triangle">
+              <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10 3l8 14H2L10 3z"/></svg>
+              Triangle
+            </button>
+          </div>
+        </section>
+
+        <div class="divider"></div>
+
+        <!-- eraser -->
+        <section class="tool-section">
+          <button class="tool-btn wide" id="btnErase">
+            <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 16H7L3 12l9-9 5 5-3 3"/><path d="M5 15l2-2"/></svg>
+            Eraser
+          </button>
+        </section>
+
+        <div class="divider"></div>
+
+        <!-- clear all -->
         <section class="tool-section">
           <button class="clear-btn" id="btnClear">
             <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="3 5 5 5 17 5"/><path d="M15 5l-.87 11.14A2 2 0 0112.14 18H7.86A2 2 0 015.87 16.14L5 5"/><path d="M8 9v6M12 9v6M7 5V3h6v2"/></svg>
@@ -137,6 +182,7 @@
       <main class="stage">
         <div class="canvas-wrap" id="canvasWrap">
           <canvas id="canvas"></canvas>
+          <canvas id="previewCanvas"></canvas>
         </div>
       </main>
     </div>
@@ -149,19 +195,15 @@
 
   </div>
 
-  <!-- view logs -->
+  <!-- logs -->
   <div class="logs-view" id="logsView">
     <header class="logs-topbar">
       <div class="brand-text">
         <span class="brand-name">RAFT Board</span>
         <span class="brand-sub">session logs</span>
       </div>
-
       <div class="logs-stats">
-        <div class="stat-chip">
-          <span class="stat-dot" id="logStatusDot"></span>
-          <span id="logStatusLabel">—</span>
-        </div>
+        <div class="stat-chip"><span class="stat-dot" id="logStatusDot"></span><span id="logStatusLabel">—</span></div>
         <div class="stat-chip">
           <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M8 3v5l3 3"/><circle cx="8" cy="8" r="6"/></svg>
           <span id="logAvgLatency">avg RTT: —</span>
@@ -175,7 +217,6 @@
           <span id="logLeader">leader: —</span>
         </div>
       </div>
-
       <div class="logs-actions">
         <button class="topbar-btn" id="btnClearLogs">Clear</button>
         <button class="topbar-btn" id="btnDownloadLogs">
@@ -185,7 +226,6 @@
         <button class="topbar-btn accent" id="btnCloseLogs">← Back to canvas</button>
       </div>
     </header>
-
     <div class="log-filters">
       <button class="filter-btn active" data-filter="all">All</button>
       <button class="filter-btn" data-filter="ws">Connection</button>
@@ -194,7 +234,6 @@
       <button class="filter-btn" data-filter="error">Errors</button>
       <button class="filter-btn" data-filter="leader">Leader</button>
     </div>
-
     <div class="log-body" id="logBody"></div>
   </div>
 
