@@ -1,4 +1,4 @@
-const Logger = (function () 
+window.Logger = (function () 
 {  'use strict';
   // Internal store 
   const entries = [];          
@@ -263,8 +263,7 @@ const Logger = (function ()
   }
 );
 
-  return 
-  {
+  return {
     wsConnect, wsDisconnect, wsRetry, wsError,
     strokeSent, strokeReceived,
     leaderChanged, noLeader,
@@ -272,6 +271,4 @@ const Logger = (function ()
     download, clear, openLogs, closeLogs
   };
 
-}
-)
-();
+})();
