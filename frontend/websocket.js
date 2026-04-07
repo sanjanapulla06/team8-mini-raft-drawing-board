@@ -357,6 +357,4 @@ const WS = (function ()
 
   return { sendStroke, onStroke, onOpen, setClientId };
 
-}
-)
-();
+})();
