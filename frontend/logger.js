@@ -1,4 +1,4 @@
-window.Logger = (function () 
+const Logger = (function () 
 {  'use strict';
   // Internal store 
   const entries = [];          
