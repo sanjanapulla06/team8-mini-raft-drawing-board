@@ -5,7 +5,7 @@ NODES = {
     1: "http://localhost:5001",
     2: "http://localhost:5002",
     3: "http://localhost:5003",
-    4: "http://localhost:5004",  # NEW NODE 4
+   # 4: "http://localhost:5004",  
 }
 
 # ── Fetch statuses to determine column widths dynamically ──
