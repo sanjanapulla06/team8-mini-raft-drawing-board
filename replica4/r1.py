@@ -13,7 +13,7 @@ ALL_PEERS = {
     1: os.environ.get("REPLICA1_URL", "http://localhost:5001"),
     2: os.environ.get("REPLICA2_URL", "http://localhost:5002"),
     3: os.environ.get("REPLICA3_URL", "http://localhost:5003"),
-    4: os.environ.get("REPLICA4_URL", "http://localhost:5004"),  # <<< NEW REPLICA 4
+   # 4: os.environ.get("REPLICA4_URL", "http://localhost:5004"),  
 }
 
 # ── Timeouts and logs ──
