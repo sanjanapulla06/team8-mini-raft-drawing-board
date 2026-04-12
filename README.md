@@ -23,4 +23,4 @@ A **Gateway service** manages WebSocket connections, forwards drawing events to 
 - **Docker** – Containerized deployment using Docker Compose  
 
 ## Goal
-Build a **fault-tolerant distributed system** that maintains consistent drawing state across replicas, even during replica failures or restarts.s
+Build a **fault-tolerant distributed system** that maintains consistent drawing state across replicas, even during replica failures or restarts.
