@@ -8,6 +8,10 @@ import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+# adding imports (bonus part) - shreya
+from bonus.network_part import is_partitioned, toggle_partition
+from bonus.vector import add_stroke, handle_undo, handle_erase, get_strokes
+
 # ── Peer configuration ──
 ALL_PEERS = {
     1: os.environ.get("REPLICA1_URL", "http://localhost:5001"),
@@ -271,22 +275,63 @@ def create_app(node):
         d = request.json
         return jsonify(node.handle_append_entries(d["term"], d["leader_id"], d.get("stroke")))
 
+    # @app.route("/stroke", methods=["POST"])
+    # def stroke():
+    #     d = request.json
+    #     with node.lock:
+    #         if node.state != "leader":
+    #             return jsonify({"success": False, "error": "not leader"})
+    #         stroke_data = d.get("stroke")
+    #         term        = node.current_term
+    #         leader_id   = node.id
+
+    #     committed = 0
+    #     for peer_url in node.peers.values():
+    #         try:
+    #             r = requests.post(f"{peer_url}/append-entries",
+    #                               json={"term": term, "leader_id": leader_id, "stroke": stroke_data},
+    #                               timeout=1.0)
+    #             if r.json().get("success"):
+    #                 committed += 1
+    #         except Exception:
+    #             pass
+
+    #     with node.lock:
+    #         node.stroke_log.append(stroke_data)
+    #         node._save_strokes()
+    #         node._log(f"Stroke accepted and replicated to {committed} nodes ✓")
+
+    #     return jsonify({"success": True, "stroke": stroke_data, "replicated_to": committed})
+
+    # edited /stroke - shreya 
+    # Prevents accepting writes when node is isolated , only leader accepts writes , calls handle_undo(stroke_id)
     @app.route("/stroke", methods=["POST"])
     def stroke():
         d = request.json
+        if is_partitioned():
+            time.sleep(2)
+            return jsonify({"success": False, "error": "partitioned"})
+
         with node.lock:
             if node.state != "leader":
                 return jsonify({"success": False, "error": "not leader"})
+
             stroke_data = d.get("stroke")
             term        = node.current_term
             leader_id   = node.id
 
+        if stroke_data.get("type") == "undo":
+            handle_undo(stroke_data.get("stroke_id"))
+            return jsonify({"success": True, "action": "undo"})
+        
         committed = 0
         for peer_url in node.peers.values():
             try:
-                r = requests.post(f"{peer_url}/append-entries",
-                                  json={"term": term, "leader_id": leader_id, "stroke": stroke_data},
-                                  timeout=1.0)
+                r = requests.post(
+                    f"{peer_url}/append-entries",
+                    json={"term": term, "leader_id": leader_id, "stroke": stroke_data},
+                    timeout=1.0
+                )
                 if r.json().get("success"):
                     committed += 1
             except Exception:
@@ -295,9 +340,14 @@ def create_app(node):
         with node.lock:
             node.stroke_log.append(stroke_data)
             node._save_strokes()
-            node._log(f"Stroke accepted and replicated to {committed} nodes ✓")
+            add_stroke(stroke_data)
+            node._log(f"Stroke accepted and replicated to {committed} nodes")
 
-        return jsonify({"success": True, "stroke": stroke_data, "replicated_to": committed})
+        return jsonify({
+            "success": True,
+            "stroke": stroke_data,
+            "replicated_to": committed
+        })
 
     @app.route("/get_strokes", methods=["GET"])
     def get_strokes():
