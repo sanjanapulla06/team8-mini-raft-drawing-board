@@ -13,7 +13,7 @@ ALL_PEERS = {
     1: os.environ.get("REPLICA1_URL", "http://localhost:5001"),
     2: os.environ.get("REPLICA2_URL", "http://localhost:5002"),
     3: os.environ.get("REPLICA3_URL", "http://localhost:5003"),
-   # 4: os.environ.get("REPLICA4_URL", "http://localhost:5004"),  
+    
 }
 
 # ── Timeouts and logs ──
@@ -79,7 +79,7 @@ class RaftNode:
 
     # ── Save / Load election history ──
     def _save_election_history(self, record):
-        path = f"{LOGS_DIR}/election_history_node{self.id}.json"  # node-specific
+        path = f"{LOGS_DIR}/election_history_node{self.id}.json"
         try:
             with open(path, "r") as f:
                 all_history = json.load(f)
@@ -90,7 +90,7 @@ class RaftNode:
             json.dump(all_history, f, indent=2)
 
     def _load_election_history(self):
-        path = f"{LOGS_DIR}/election_history_node{self.id}.json"  # node-specific
+        path = f"{LOGS_DIR}/election_history_node{self.id}.json"
         try:
             with open(path, "r") as f:
                 self.election_history = json.load(f)
@@ -105,14 +105,17 @@ class RaftNode:
         print(f"[Node {self.id} | {self.state.upper():9s} | term {self.current_term}]  {msg}", flush=True)
 
     # ── Election & heartbeat loops ──
+    # FIX: release lock before _start_election() makes HTTP calls — prevents deadlock
     def _election_loop(self):
         while True:
             time.sleep(0.5)
             with self.lock:
-                if self.state == "leader":
-                    continue
-                if time.time() - self.last_heartbeat >= self.election_timeout:
-                    self._start_election()
+                should_start = (
+                    self.state != "leader" and
+                    time.time() - self.last_heartbeat >= self.election_timeout
+                )
+            if should_start:
+                self._start_election()
 
     def _start_election(self):
         self.state        = "candidate"
