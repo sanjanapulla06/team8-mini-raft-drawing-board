@@ -25,12 +25,14 @@ GATEWAY_URL = os.environ.get("GATEWAY_URL", "http://localhost:8080")
 REPLICA1_URL = os.environ.get("REPLICA1_URL", "http://replica1:5001")
 REPLICA2_URL = os.environ.get("REPLICA2_URL", "http://replica2:5002")
 REPLICA3_URL = os.environ.get("REPLICA3_URL", "http://replica3:5003")
+REPLICA4_URL = os.environ.get("REPLICA4_URL", "http://replica4:5004")
 
 # ── Map REPLICA_ID string to integer node id for Sharon's RaftNode ────────────
 REPLICA_ID_MAP = {
     "replica1": 1,
     "replica2": 2,
     "replica3": 3,
+    "replica4": 4,
 }
 NODE_ID = REPLICA_ID_MAP.get(REPLICA_ID, 1)
 
@@ -39,6 +41,7 @@ ALL_REPLICAS = [
     {"id": "replica1", "url": REPLICA1_URL},
     {"id": "replica2", "url": REPLICA2_URL},
     {"id": "replica3", "url": REPLICA3_URL},
+    {"id": "replica4", "url": REPLICA4_URL},
 ]
 PEERS = [r for r in ALL_REPLICAS if r["id"] != REPLICA_ID]
 
