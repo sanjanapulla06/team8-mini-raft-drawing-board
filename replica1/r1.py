@@ -347,11 +347,23 @@ def create_app(node):
         html_path = os.path.join(os.path.dirname(__file__), "visualiser.html")
         with open(html_path, "r", encoding="utf-8") as f:
             return f.read()
-
+            
+# ------------------------------------------------------------------
+# edited /status - shreya
+# added partition awareness ; if node is in simulated netwrk partition return partitioned state instead of actual node status
     @app.route("/status", methods=["GET"])
     def status():
+        if is_partitioned():
+            return jsonify({"state": "partitioned"})
         return jsonify(node.status())
 
+# new endpoint - testing for fault tolerance ; fault injection 
+    @app.route("/toggle_partition", methods=["POST"])
+    def toggle_partition_api():
+        state = toggle_partition()
+        return jsonify({"partitioned": state})
+    
+# ------------------------------------------------------------------
     return app
 
 
