@@ -8,6 +8,8 @@ const WS = (function ()
   const EARLY_CLOSE_MS = 30000;
   let socket           = null;
   const strokeHandlers = [];
+  const snapshotHandlers = [];
+  const snapshotResetHandlers = [];
   const openHandlers   = [];
   let reconnectAttempt = 0;
   let strokeCount      = 0;
@@ -248,6 +250,23 @@ const WS = (function ()
             ws.send(JSON.stringify({ type: 'pong' }));
           return;
         }
+        if (payload && typeof payload === 'object' && payload.type === 'snapshot') 
+        {
+          const strokes = Array.isArray(payload.strokes) ? payload.strokes : [];
+          strokeCount = strokes.length;
+          if (strokeCountEl) 
+            strokeCountEl.textContent = `strokes: ${strokeCount}`;
+          snapshotHandlers.forEach(h => { try { h(strokes); } catch(e) { Logger.error('snapshot handler failed', String(e)); } });
+          return;
+        }
+        if (payload && typeof payload === 'object' && payload.type === 'snapshot-reset') 
+        {
+          strokeCount = 0;
+          if (strokeCountEl) 
+            strokeCountEl.textContent = 'strokes: 0';
+          snapshotResetHandlers.forEach(h => { try { h(); } catch(e) { Logger.error('snapshot reset handler failed', String(e)); } });
+          return;
+        }
         if (payload && typeof payload === 'object' && (payload.type === 'pong' || payload.type === 'keepalive')) 
           return;
         if (payload && typeof payload === 'object' && payload.error) 
@@ -323,6 +342,16 @@ const WS = (function ()
     if (typeof fn === 'function') strokeHandlers.push(fn); 
   }
 
+  function onSnapshot(fn)
+  {
+    if (typeof fn === 'function') snapshotHandlers.push(fn);
+  }
+
+  function onSnapshotReset(fn)
+  {
+    if (typeof fn === 'function') snapshotResetHandlers.push(fn);
+  }
+
   function onOpen(fn)   
   { 
     if (typeof fn === 'function') openHandlers.push(fn); 
@@ -355,6 +384,8 @@ const WS = (function ()
   setInterval(pollHealth, HEALTH_MS);
   pollHealth();
 
-  return { sendStroke, onStroke, onOpen, setClientId };
+  return { sendStroke, onStroke, onSnapshot, onSnapshotReset, onOpen, setClientId };
 
-})();
+}
+)
+();
