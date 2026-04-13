@@ -10,7 +10,7 @@ from flask_cors import CORS
 # ------------------------------------------------------------------
 # adding imports (bonus part) - shreya
 from bonus.network_part import is_partitioned, toggle_partition
-from bonus.vector import add_stroke, handle_undo, handle_erase, get_strokes
+from bonus.vector import materialize_visible_strokes
 # ------------------------------------------------------------------
 # ── Peer configuration ──
 ALL_PEERS = {
@@ -293,9 +293,9 @@ def create_app(node):
             term        = node.current_term
             leader_id   = node.id
 
-        if stroke_data.get("type") == "undo":
-            handle_undo(stroke_data.get("stroke_id"))
-            return jsonify({"success": True, "action": "undo"})
+        # if stroke_data.get("type") == "undo":
+        #     handle_undo(stroke_data.get("stroke_id"))
+        #     return jsonify({"success": True, "action": "undo"})
         
         committed = 0
         for peer_url in node.peers.values():
@@ -313,7 +313,7 @@ def create_app(node):
         with node.lock:
             node.stroke_log.append(stroke_data)
             node._save_strokes()
-            add_stroke(stroke_data)
+            # add_stroke(stroke_data)
             node._log(f"Stroke accepted and replicated to {committed} nodes")
 
         return jsonify({
