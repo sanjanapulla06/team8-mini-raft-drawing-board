@@ -20,6 +20,7 @@
     nameModalBg.style.display = 'none';
     appView.style.display     = 'flex';
     document.getElementById('myNameLabel').textContent = MY_NAME;
+    WS.setClientId(MY_ID, MY_NAME, MY_COLOR);
     _initSelfAvatar();
     resizeCanvas();
     Logger.info(`Session started as "${MY_NAME}"`);
@@ -36,6 +37,7 @@
     if (!newName || !newName.trim()) return;
     MY_NAME = newName.trim();
     document.getElementById('myNameLabel').textContent = MY_NAME;
+    WS.setClientId(MY_ID, MY_NAME, MY_COLOR);
     const selfAvatar = document.querySelector('.peer-avatar[data-self]');
     if (selfAvatar) {
       selfAvatar.childNodes[0].textContent = MY_NAME.slice(0, 2);
@@ -206,11 +208,27 @@
   }
 );
 
-  WS.onOpen(function () 
+  WS.onSnapshot(function (strokes)
   {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-  }
-);
+    strokes.forEach((stroke) => {
+      if (stroke.shape) 
+      {
+        drawShape(stroke.shape, stroke.x0, stroke.y0, stroke.x, stroke.y, stroke.color, stroke.size);
+      } 
+      else 
+      {
+        const x0 = stroke.x0 !== undefined ? stroke.x0 : stroke.x;
+        const y0 = stroke.y0 !== undefined ? stroke.y0 : stroke.y;
+        drawSeg(x0, y0, stroke.x, stroke.y, stroke.color, stroke.size, stroke.brush || 'pen');
+      }
+    });
+  });
+
+  WS.onSnapshotReset(function ()
+  {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  });
 
   // pointe - x,y
   function getPos(e) 
@@ -364,8 +382,11 @@
   const peers = {};
   WS.onStroke(function (stroke) 
   {
-    if (stroke.color === color && !stroke.shape) return;
-    _updatePeerCursor(stroke.color, stroke.color, stroke.color, null, null);
+    const peerId = stroke.clientId || `${stroke.peerName || 'peer'}:${stroke.peerColor || stroke.color || 'unknown'}`;
+    if (!peerId || peerId === MY_ID) return;
+    const peerName = stroke.peerName || 'Peer';
+    const peerColor = stroke.peerColor || stroke.color || '#64748b';
+    _updatePeerCursor(peerId, peerName, peerColor, null, null);
   }
 );
 
@@ -553,7 +574,7 @@
     a.href     = off.toDataURL('image/png');
     a.click();
     Logger.info('Canvas exported as PNG');
-    window.toast('🖼️ Downloaded!');
+    window.toast('Downloaded!');
   }
   document.getElementById('btnDownload').addEventListener('click', exportPNG);
 
