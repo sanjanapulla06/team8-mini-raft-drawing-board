@@ -6,7 +6,7 @@
   --surface-tint: rgba(253,250,245,0.82);
   --border:       rgba(139,109,76,0.18);
   --border-mid:   rgba(139,109,76,0.32);
-  --accent:       #5a7a52;   /* sage green */
+  --accent:       #5a7a52;  
   --accent-lt:    #eef4ec;
   --accent-glow:  rgba(90,122,82,0.20);
   --ok:   #6a9e5e;
@@ -177,7 +177,8 @@ body::before
 .topbar-btn:active  {transform:none }
 .topbar-btn.accent {background:var(--accent);border-color:var(--accent);color:#fff;box-shadow:0 4px 14px var(--accent-glow) }
 .topbar-btn.accent:hover {filter:brightness(1.08) }
-.theme-btn
+.theme-btn,
+.theme-toggle
 {
   width:32px;height:32px;padding:0;
   border-radius:50%;
@@ -186,7 +187,8 @@ body::before
   cursor:pointer;transition:all .2s var(--ease-s);
   font-size:1rem;
 }
-.theme-btn:hover{background:var(--accent-lt);border-color:var(--accent);transform:rotate(20deg) scale(1.1)}
+.theme-btn:hover,
+.theme-toggle:hover{background:var(--accent-lt);border-color:var(--accent);transform:rotate(20deg) scale(1.1)}
 .workspace{flex:1;display:flex;overflow:hidden;min-height:0}
 
 /* sidebar */
