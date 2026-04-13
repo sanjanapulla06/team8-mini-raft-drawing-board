@@ -7,11 +7,11 @@ import json
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-
+# ------------------------------------------------------------------
 # adding imports (bonus part) - shreya
 from bonus.network_part import is_partitioned, toggle_partition
 from bonus.vector import add_stroke, handle_undo, handle_erase, get_strokes
-
+# ------------------------------------------------------------------
 # ── Peer configuration ──
 ALL_PEERS = {
     1: os.environ.get("REPLICA1_URL", "http://localhost:5001"),
@@ -274,7 +274,8 @@ def create_app(node):
     def append_entries():
         d = request.json
         return jsonify(node.handle_append_entries(d["term"], d["leader_id"], d.get("stroke")))
-
+        
+    # ------------------------------------------------------------------
     # edited /stroke - shreya 
     # Prevents accepting writes when node is isolated , only leader accepts writes , calls handle_undo(stroke_id)
     @app.route("/stroke", methods=["POST"])
@@ -321,10 +322,13 @@ def create_app(node):
             "replicated_to": committed
         })
         
+# editing /get_strokes for bonus - shreya
+# use get_strokes() instead of node.stroke_log ; abstraction layer so stroke retrieval logic can be changed without changing api
     @app.route("/get_strokes", methods=["GET"])
-    def get_strokes():
+    def get_strokes_api():
         with node.lock:
-            return jsonify({"strokes": node.stroke_log})
+            return jsonify({"strokes": get_strokes()})
+# ------------------------------------------------------------------
 
     @app.route("/election_history", methods=["GET"])
     def election_history():
