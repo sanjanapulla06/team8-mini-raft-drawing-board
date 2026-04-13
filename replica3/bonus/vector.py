@@ -1,18 +1,14 @@
 def _stroke_id(stroke):
     return stroke.get("id")
 
-
 def _is_draw_like(op):
     return op.get("type") in {"draw", "shape", "erase"}
-
 
 def _is_undo_comp(op):
     return op.get("type") == "undo_comp"
 
-
 def _is_redo_comp(op):
     return op.get("type") == "redo_comp"
-
 
 def materialize_visible_strokes(committed_strokes):
     ordered_ids = []
@@ -44,7 +40,6 @@ def materialize_visible_strokes(committed_strokes):
 
     return [by_id[sid] for sid in ordered_ids if sid in by_id and sid not in hidden]
 
-
 def resolve_undo_target(committed_strokes, client_id):
     if not client_id:
         return None
@@ -55,7 +50,6 @@ def resolve_undo_target(committed_strokes, client_id):
             if sid:
                 return sid
     return None
-
 
 def resolve_redo_target(committed_strokes, client_id):
     if not client_id:
