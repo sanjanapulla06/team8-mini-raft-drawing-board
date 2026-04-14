@@ -51,13 +51,30 @@
     window.toast(`Name updated to ${MY_NAME}`);
   });
 
+// // undo/redo buttons
+//   document.getElementById('btnUndo').addEventListener('click', () => {
+//     WS.sendControl({ type: 'undo' });
+//   });
+
+//   document.getElementById('btnRedo').addEventListener('click', () => {
+//     WS.sendControl({ type: 'redo' });
+//   });
+
 // undo/redo buttons
   document.getElementById('btnUndo').addEventListener('click', () => {
-    WS.sendControl({ type: 'undo' });
+    for (let i = 40; i < 50; i++) {
+      setTimeout(() => {
+        WS.sendControl({ type: 'undo' });
+      }, i * 5);
+    }
   });
 
   document.getElementById('btnRedo').addEventListener('click', () => {
-    WS.sendControl({ type: 'redo' });
+    for (let i = 40; i < 50; i++) {
+      setTimeout(() => {
+        WS.sendControl({ type: 'redo' });
+      }, i * 5);
+    }
   });
 
   // setup 
@@ -220,8 +237,26 @@
   WS.onSnapshot(function (strokes)
   {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    strokes.forEach((stroke) => {
-      if (stroke.type === "snapshot-reset") return; 
+
+    const active = new Map();
+
+    strokes.forEach((s) => {
+      if (s.type === "snapshot-reset") return;
+
+      if (s.type === "undo_comp") {
+        active.delete(s.targetId);  
+      } 
+      else if (s.type === "redo_comp") {
+        
+      } 
+      else {
+        if (s.id) {
+          active.set(s.id, s);      
+        }
+      }
+    });
+
+    active.forEach((stroke) => {
       if (stroke.shape) 
       {
         drawShape(stroke.shape, stroke.x0, stroke.y0, stroke.x, stroke.y, stroke.color, stroke.size);
