@@ -51,6 +51,15 @@
     window.toast(`Name updated to ${MY_NAME}`);
   });
 
+// undo/redo buttons
+  document.getElementById('btnUndo').addEventListener('click', () => {
+    WS.sendControl({ type: 'undo' });
+  });
+
+  document.getElementById('btnRedo').addEventListener('click', () => {
+    WS.sendControl({ type: 'redo' });
+  });
+
   // setup 
   const canvas        = document.getElementById('canvas');
   const ctx           = canvas.getContext('2d');
