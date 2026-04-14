@@ -212,6 +212,7 @@
   {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     strokes.forEach((stroke) => {
+      if (stroke.type === "snapshot-reset") return; 
       if (stroke.shape) 
       {
         drawShape(stroke.shape, stroke.x0, stroke.y0, stroke.x, stroke.y, stroke.color, stroke.size);
@@ -224,6 +225,7 @@
       }
     });
   });
+
 
   WS.onSnapshotReset(function ()
   {
