@@ -264,7 +264,6 @@ async def send_current_snapshot(ws: WebSocket) -> None:
             # Send empty snapshot so client is at least ready
             await _safe_send_text(ws, json.dumps({"type": "snapshot-reset"}))
             return
-
     try:
         strokes_response = await _http_get_json(f"{leader}/get_strokes", timeout=GET_TIMEOUT_SECONDS)
     except Exception as e:
