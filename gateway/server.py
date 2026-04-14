@@ -361,8 +361,20 @@ async def poll_and_broadcast_committed_strokes() -> None:
             await asyncio.sleep(0.2)
             continue
 
+# ----------------------------------------------------------------
+# editing for bonus - shreya
+#  incase of undo, incremental updates are invalid ; force canvas reset, replay curr state 
+#  clients consistent with committed log.
+        # if len(strokes) < last_sent_index:
+        #     last_sent_index = 0
         if len(strokes) < last_sent_index:
-            last_sent_index = 0
+            await broadcast_strokes([{"type": "snapshot-reset"}])
+            await broadcast_strokes(strokes)
+            last_sent_index = len(strokes)
+            last_sent_index_by_leader[leader] = last_sent_index
+            await asyncio.sleep(0.2)
+            continue
+# ----------------------------------------------------------------
 
         new_strokes = strokes[last_sent_index:]
         if new_strokes:
