@@ -360,15 +360,17 @@ async def poll_and_broadcast_committed_strokes() -> None:
             await asyncio.sleep(0.2)
             continue
 
-# ----------------------------------------------------------------
+# # ----------------------------------------------------------------
 # editing for bonus - shreya
 #  incase of undo, incremental updates are invalid ; force canvas reset, replay curr state 
 #  clients consistent with committed log.
-        # if len(strokes) < last_sent_index:
-        #     last_sent_index = 0
+    
         if len(strokes) < last_sent_index:
-            await broadcast_strokes([{"type": "snapshot-reset"}])
-            await broadcast_strokes(strokes)
+            payload = {
+                "type": "snapshot",
+                "strokes": strokes
+            }
+            await broadcast_strokes([payload])
             last_sent_index = len(strokes)
             last_sent_index_by_leader[leader] = last_sent_index
             await asyncio.sleep(0.2)
@@ -425,6 +427,40 @@ async def websocket_endpoint(ws: WebSocket):
             raw_data = await ws.receive_text()
             try:
                 data = json.loads(raw_data)
+# -----------------------------------------------------------------
+#  editing for bonus moduke - shreya
+# Handle undo/redo control messages from the client separately from regular stroke payloads. 
+# forwarded directly to the leader
+ 
+                control = data.get("control") if isinstance(data, dict) else None
+
+                if isinstance(control, dict):
+                    ctrl_type = control.get("type")
+
+                    if ctrl_type in {"undo", "redo"}:
+                        leader, _ = get_leader_snapshot()
+
+                        if leader is None:
+                            await _safe_send_text(ws, json.dumps({"error": "no leader available"}))
+                            continue
+
+                        try:
+                            result = await _http_post_json(
+                                f"{leader}/stroke",
+                                {"stroke": control},
+                                timeout=POST_TIMEOUT_SECONDS
+                            )
+                        except Exception:
+                            mark_leader_failure(leader)
+                            continue
+
+                        if result.get("success") is not True:
+                            mark_leader_failure(leader)
+                            continue
+
+                        mark_leader_success(leader)
+                        continue
+# ---------------------------------------------------
             except json.JSONDecodeError:
                 sent = await _safe_send_text(ws, json.dumps({"error": "invalid json"}))
                 if not sent:
