@@ -2,13 +2,31 @@
 # Week 2 — Shrivadhu
 
 from flask import Blueprint, request, jsonify
-
+# -------------------------------------------------------
+# adding imports for bonus - shreya
+from bonus.network_part import is_partitioned, toggle_partition
+from bonus.vector import ( materialize_visible_strokes, resolve_undo_target, resolve_redo_target)
+import uuid
+# --------------------------------------------------------
 def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     rpc = Blueprint("rpc", __name__)
-
+# ---------------------------------------------------------
+# edits - shreya
+# block RPC calls when node is partitioned ; to simulates network failure by rejecting incoming requests
+     def _partition_block():
+        if is_partitioned():
+            return jsonify({"success": False, "error": "partitioned"}), 503
+        return None
+# ---------------------------------------------------------
     # ── POST /request_vote ────────────────────────────────────────────────────
     @rpc.route("/request_vote", methods=["POST"])
     def request_vote():
+# ----------------------------------------------------------------
+#  simulated newtork failure, block if noe partitioned - shreya
+        blocked = _partition_block()
+        if blocked:
+            return blocked
+# ---------------------------------------------------------
         data           = request.get_json()
         term           = data["term"]
         candidate_id   = data.get("candidateId") or data.get("candidate_id")
@@ -47,6 +65,12 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     # ── POST /append_entries ──────────────────────────────────────────────────
     @rpc.route("/append_entries", methods=["POST"])
     def append_entries():
+# ------------------------------------------------------------------
+#  simulated newtork failure, block if noe partitioned - shreya
+        blocked = _partition_block()
+        if blocked:
+            return blocked
+# ---------------------------------------------------------
         data = request.get_json()
         term      = data["term"]
         leader_id = data.get("leaderId") or data.get("leader_id")
@@ -98,6 +122,12 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     # ── POST /heartbeat ───────────────────────────────────────────────────────
     @rpc.route("/heartbeat", methods=["POST"])
     def heartbeat():
+# ------------------------------------------------------------------
+#  simulated newtork failure, block if noe partitioned - shreya
+        blocked = _partition_block()
+        if blocked:
+            return blocked
+# --------------------------------------------------------------
         data          = request.get_json()
         term          = data["term"]
         leader_id     = data.get("leaderId") or data.get("leader_id")
@@ -122,6 +152,12 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     @rpc.route("/sync_log", methods=["POST"])
     @rpc.route("/sync-log", methods=["POST"])
     def sync_log():
+# ------------------------------------------------------------------
+#  simulated newtork failure, block if noe partitioned - shreya
+        blocked = _partition_block()
+        if blocked:
+            return blocked
+# --------------------------------------------------------------
         data          = request.get_json()
         entries       = data.get("entries", [])
         leader_commit = data.get("leaderCommit", -1)
@@ -147,6 +183,20 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     # ── GET /status ───────────────────────────────────────────────────────────
     @rpc.route("/status", methods=["GET"])
     def status():
+# -----------------------------------------------------------------
+#  edited status endpoint 
+# change status endpoint to show partition state ; partitioned, node - unavailable
+        if is_partitioned():
+            return jsonify({
+                "replicaId": state.replica_id,
+                "role": "partitioned",
+                "state": "partitioned",
+                "term": state.current_term,
+                "leaderId": None,
+                "logLength": log.length,
+                "commitIndex": log.commit_index,
+            })
+# ----------------------------------------------------------------------
         return jsonify({
             "replicaId":   state.replica_id,
             "role":        state.role,
@@ -161,20 +211,70 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     # ── POST /stroke ──────────────────────────────────────────────────────────
     @rpc.route("/stroke", methods=["POST"])
     def stroke():
+# ------------------------------------------------------------------
+#  simulated newtork failure, block if noe partitioned - shreya
+        blocked = _partition_block()
+        if blocked:
+            return blocked
+# --------------------------------------------------------------
         if not state.is_leader():
             return jsonify({"error": "not leader", "leaderId": state.leader_id}), 302
 
         from replication import replicate_entry
-        stroke_data = request.get_json().get("stroke")
+# --------------------------------------------------------------
+#  editing stroke handling - shreya
+# add partition awareness ; only leader cam write ; undo/redo ; unique ids
+
+        stroke_data = request.get_json().get("stroke") or {}
+        op_type = stroke_data.get("type")
+        committed = [e["stroke"] for e in log.committed_entries()]
+               if op_type == "undo":
+            target_id = resolve_undo_target(committed, stroke_data.get("clientId"))
+            if not target_id:
+                return jsonify({"success": True, "noop": True, "action": "undo"})
+            stroke_data = {
+                "type": "undo_comp",
+                "clientId": stroke_data.get("clientId"),
+                "targetId": target_id,
+            }
+        elif op_type == "redo":
+            target_id = resolve_redo_target(committed, stroke_data.get("clientId"))
+            if not target_id:
+                return jsonify({"success": True, "noop": True, "action": "redo"})
+            stroke_data = {
+                "type": "redo_comp",
+                "clientId": stroke_data.get("clientId"),
+                "targetId": target_id,
+            }
+
+        if stroke_data.get("type") in {"draw", "shape", "erase"} and not stroke_data.get("id"):
+            stroke_data["id"] = f"{stroke_data.get('clientId', 'anon')}-{uuid.uuid4().hex[:12]}"
+
+
+# convert undo intent to deterministic log operation ; redo resolved using log history
+# --------------------------------------------------------------
         entry       = log.append(state.current_term, stroke_data)
         replicate_entry(state, log, election_mgr.peers, entry, on_stroke_committed)
-        return jsonify({"success": True, "index": entry["index"]})
-
+        # return jsonify({"success": True, "index": entry["index"]})
+# --------------------------------------------------------------
+        return jsonify({"success": True, "index": entry["index"], "op": stroke_data.get("type")})
+# --------------------------------------------------------------
 
     # ── GET /get_strokes ──────────────────────────────────────────────────────
     @rpc.route("/get_strokes", methods=["GET"])
     def get_strokes():
-        return jsonify({"strokes": [e["stroke"] for e in log.committed_entries()]})
-
+# --------------------------------------------------------------
+# modifying stroke retrieval - shreya
+# we find the visible state by applying undo/redo operations
+        committed = [e["stroke"] for e in log.committed_entries()]
+        visible = materialize_visible_strokes(committed)
+        return jsonify({"strokes": visible})
+# adding endpoint to toggle network partition ; testing fault tolerance, recovery
+    @rpc.route("/toggle_partition", methods=["POST"])
+    def toggle_partition_api():
+        state_now = toggle_partition()
+        return jsonify({"partitioned": state_now})
+# --------------------------------------------------------------
+        # return jsonify({"strokes": [e["stroke"] for e in log.committed_entries()]})
 
     return rpc
