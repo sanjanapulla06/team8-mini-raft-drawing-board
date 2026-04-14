@@ -332,13 +332,17 @@ const WS = (function ()
     catch (e) { Logger.error('socket.send() failed', e.message); }
   }
 
-  function sendControl(data) {
-    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+ function sendControl(data) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) return;
 
-    socket.send(JSON.stringify({
-      control: data
-    }));
-  }
+  socket.send(JSON.stringify({
+    control: {
+      type: data.type,        
+      clientId: _clientId    
+    }
+  }));
+}
+
 
   function _fingerprint(s) 
   { 
