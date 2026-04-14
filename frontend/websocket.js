@@ -332,6 +332,14 @@ const WS = (function ()
     catch (e) { Logger.error('socket.send() failed', e.message); }
   }
 
+  function sendControl(data) {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+
+    socket.send(JSON.stringify({
+      control: data
+    }));
+  }
+
   function _fingerprint(s) 
   { 
     return `${Math.round(s.x)},${Math.round(s.y)},${s.color},${s.size}`; 
@@ -384,7 +392,7 @@ const WS = (function ()
   setInterval(pollHealth, HEALTH_MS);
   pollHealth();
 
-  return { sendStroke, onStroke, onSnapshot, onSnapshotReset, onOpen, setClientId };
+  return { sendStroke, sendControl, onStroke, onSnapshot, onSnapshotReset, onOpen, setClientId };
 
 }
 )
