@@ -4,8 +4,16 @@
 from flask import Blueprint, request, jsonify
 # -------------------------------------------------------
 # adding imports for bonus - shreya
-from bonus.network_part import is_partitioned, toggle_partition
-from bonus.vector import ( materialize_visible_strokes, resolve_undo_target, resolve_redo_target)
+from bonus.network_part import (
+    is_partitioned,
+    toggle_partition,
+    safe_post,         
+)
+from bonus.vector import (
+    materialize_visible_strokes,
+    resolve_undo_target,
+    resolve_redo_target,
+)
 import uuid
 # --------------------------------------------------------
 def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
@@ -18,9 +26,19 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
             return jsonify({"success": False, "error": "partitioned"}), 503
         return None
 # ---------------------------------------------------------
+
     # ── POST /request_vote ────────────────────────────────────────────────────
     @rpc.route("/request_vote", methods=["POST"])
     def request_vote():
+# ---------------------------------------------------------
+# edits - shreya
+# partition fix -  block incoming vote requests when partitioned -added 
+# rpc.py was only blocking append_entries / heartbeat / sync_log.
+# A partitioned node must not grant votes
+        blocked = _partition_block()
+        if blocked:
+            return blocked
+# ---------------------------------------------------------
 
         data           = request.get_json()
         term           = data["term"]
@@ -179,7 +197,7 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     @rpc.route("/status", methods=["GET"])
     def status():
 # -----------------------------------------------------------------
-#  edited status endpoint 
+# edited status endpoint - shreya
 # change status endpoint to show partition state ; partitioned, node - unavailable
         if is_partitioned():
             return jsonify({
@@ -264,11 +282,19 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         committed = [e["stroke"] for e in log.committed_entries()]
         visible = materialize_visible_strokes(committed)
         return jsonify({"strokes": visible})
+    
 # adding endpoint to toggle network partition ; testing fault tolerance, recovery
     @rpc.route("/toggle_partition", methods=["POST"])
     def toggle_partition_api():
-        state_now = toggle_partition()
-        return jsonify({"partitioned": state_now})
+        # partition edits - informing election_mgr to reset its timer so the node is silent during the partition window.
+        new_state = toggle_partition()
+        if new_state:
+            # Node got partitioned — push election timer
+            try:
+                election_mgr.reset_election_timer(far_future=True)
+            except TypeError:
+                election_mgr.reset_election_timer()
+        return jsonify({"partitioned": new_state})
 # --------------------------------------------------------------
         # return jsonify({"strokes": [e["stroke"] for e in log.committed_entries()]})
 
