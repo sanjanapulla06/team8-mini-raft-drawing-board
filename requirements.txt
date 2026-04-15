@@ -1,0 +1,8 @@
+<<<<<<< HEAD
+flask==3.0.0
+flask-cors==4.0.0
+requests==2.31.0
+=======
+flask
+requests
+>>>>>>> 50b3234cdc9942cd20ad7863cf12a6febc177149
