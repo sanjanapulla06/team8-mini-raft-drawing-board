@@ -21,12 +21,7 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
     # ── POST /request_vote ────────────────────────────────────────────────────
     @rpc.route("/request_vote", methods=["POST"])
     def request_vote():
-# ----------------------------------------------------------------
-#  simulated newtork failure, block if noe partitioned - shreya
-        blocked = _partition_block()
-        if blocked:
-            return blocked
-# ---------------------------------------------------------
+
         data           = request.get_json()
         term           = data["term"]
         candidate_id   = data.get("candidateId") or data.get("candidate_id")
