@@ -13,7 +13,7 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
 # ---------------------------------------------------------
 # edits - shreya
 # block RPC calls when node is partitioned ; to simulates network failure by rejecting incoming requests
-     def _partition_block():
+    def _partition_block():
         if is_partitioned():
             return jsonify({"success": False, "error": "partitioned"}), 503
         return None
@@ -224,7 +224,7 @@ def create_rpc_blueprint(state, log, election_mgr, on_stroke_committed):
         stroke_data = request.get_json().get("stroke") or {}
         op_type = stroke_data.get("type")
         committed = [e["stroke"] for e in log.committed_entries()]
-               if op_type == "undo":
+        if op_type == "undo":
             target_id = resolve_undo_target(committed, stroke_data.get("clientId"))
             if not target_id:
                 return jsonify({"success": True, "noop": True, "action": "undo"})
