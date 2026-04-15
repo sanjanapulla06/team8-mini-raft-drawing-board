@@ -1,10 +1,12 @@
+# FastAPI app for gateway (handles WebSocket + HTTP APIs)
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+# Allow frontend connections (CORS)
 from fastapi.middleware.cors import CORSMiddleware
-import asyncio
-import contextlib
-import json
-import requests
-import threading
+import asyncio # async operations
+import contextlib # safe cleanup of async tasks
+import json # data serialization
+import requests # HTTP calls to replicas
+import threading # background leader detection
 import time
 from typing import Any, Optional, Set
 from starlette.websockets import WebSocketState
@@ -16,8 +18,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+# Store all connected WebSocket clients
 clients: Set[WebSocket] = set()
+# Lock to safely modify clients set
 clients_lock = asyncio.Lock()
 
 REPLICA_URLS = [
@@ -26,10 +29,10 @@ REPLICA_URLS = [
     "http://localhost:5003",
 ]
 
-current_leader: Optional[str] = None
-leader_epoch = 0
+current_leader: Optional[str] = None 
+leader_epoch = 0 # Increments whenever leader changes
 leader_lock = threading.Lock()
-replication_poller_task: Optional[asyncio.Task] = None
+replication_poller_task: Optional[asyncio.Task] = None # Background polling task
 leader_miss_count = 0
 LEADER_MISS_THRESHOLD = 6
 leader_failure_count = 0
@@ -61,7 +64,7 @@ def _stroke_log_fields(stroke: Any) -> str:
         f"erase={stroke.get('erase')}"
     )
 
-
+# Safely convert values to int
 def _to_int(value: Any, default: int) -> int:
     try:
         return int(value)
@@ -412,12 +415,12 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     
     # Send snapshot BEFORE registering for live broadcasts
-    await send_current_snapshot(ws)
+    await send_current_snapshot(ws)  # Send existing data first
     if not _is_ws_connected(ws):
         return
 
     # NOW register for live updates after snapshot is complete
-    await register_client(ws)
+    await register_client(ws) # Register for live updates
     print("[GATEWAY] Client registered and ready for live updates")
     keepalive_task = asyncio.create_task(_websocket_keepalive_loop(ws))
 
@@ -509,7 +512,7 @@ async def websocket_endpoint(ws: WebSocket):
             await keepalive_task
         await unregister_client(ws)
 
-
+# Basic API endpoints
 @app.get("/")
 def root():
     leader, _ = get_leader_snapshot()
@@ -536,6 +539,7 @@ def leader():
 @app.get("/stats")
 def stats():
     leader, epoch = get_leader_snapshot()
+    # Returns system metrics
     return {
         "uptime_seconds": round(time.time() - gateway_start_time),
         "leader": leader,
@@ -551,11 +555,11 @@ def stats():
 def history():
     return {"leader_changes": leader_history}
 
-
+# Called by replicas when stroke is committed
 @app.post("/committed")
 async def committed(data: dict[str, Any]):
     stroke = data.get("stroke")
     if stroke is not None:
         print(f"[GATEWAY] Commit pushed from replica {_stroke_log_fields(stroke)}")
-        await broadcast_strokes([stroke])
+        await broadcast_strokes([stroke]) # Broadcast to all clients
     return {"status": "ok"}
