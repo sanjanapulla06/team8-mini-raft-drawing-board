@@ -8,7 +8,6 @@ import threading
 import time
 from typing import Any, Optional, Set
 from starlette.websockets import WebSocketState
-
 app = FastAPI()
 
 app.add_middleware(
