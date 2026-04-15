@@ -96,8 +96,8 @@ class RaftNode:
         path = f"{LOGS_DIR}/state_node{self.id}.json"
         try:
             with open(path, "r") as f:
-                # data = json.load(f)
-                # self.current_term = data.get("term", 0)
+                data = json.load(f)
+                self.current_term = data.get("term", 0)
                 # conflicting 
                 self.voted_for    = data.get("voted_for", None)
                 self._log(f"Loaded saved state – term={self.current_term}, voted_for={self.voted_for}")
