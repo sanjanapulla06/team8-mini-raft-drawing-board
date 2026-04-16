@@ -9,7 +9,14 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 # ------------------------------------------------------------------
 # adding imports (bonus part) - shreya
-from bonus.network_part import is_partitioned, toggle_partition
+from bonus.network_part import (
+    is_partitioned,
+    toggle_partition,
+    safe_post,              
+    register_on_partition,  
+)
+# edit - partition fix - replaces bare requests.post() for all RPCs
+# edit - partition fix - callback so election loops wake immediately
 from bonus.vector import materialize_visible_strokes
 # ------------------------------------------------------------------
 # ── Peer configuration ──
@@ -47,7 +54,37 @@ class RaftNode:
         self._load_state()
         self._load_strokes()
         self._load_election_history()
+
+# ------------------------------------------------------------------
+# edit - shreya
+#partition fix - when the node is partitioned, immediately step down from leader and reset the election
+        register_on_partition(self._on_partitioned)
+# ------------------------------------------------------------------
+
         threading.Thread(target=self._election_loop, daemon=True).start()
+
+# ------------------------------------------------------------------
+# edit - shreya
+#partition fix 
+    def _on_partitioned(self):
+        """
+        Called when toggle_partition() isolates the node.
+        -> If leader, step down — a partitioned leader should not send heartbeats or accept writes.
+        -> Reset the election timer into the future so the election loop doesn't immediately start a new election.
+        """
+        with self.lock:
+            if self.state == "leader":
+                self._log("Partition triggered — stepping down ")
+                self.state     = "follower"
+                self.leader_id = None
+                self.missed_heartbeats = 0
+            else:
+                self._log("Partition triggered — pause election participation")
+
+            # Push election timeout so node is silent while isolated.
+            self.last_heartbeat   = time.time()
+            self.election_timeout = self._new_timeout() + 60.0  # one minute
+# ------------------------------------------------------------------
 
     # ── Save / Load state ──
     def _save_state(self):
@@ -61,6 +98,7 @@ class RaftNode:
             with open(path, "r") as f:
                 data = json.load(f)
                 self.current_term = data.get("term", 0)
+                # conflicting 
                 self.voted_for    = data.get("voted_for", None)
                 self._log(f"Loaded saved state – term={self.current_term}, voted_for={self.voted_for}")
         except FileNotFoundError:
@@ -113,6 +151,13 @@ class RaftNode:
     def _election_loop(self):
         while True:
             time.sleep(0.5)
+# ------------------------------------------------------------------
+# edit - shreya
+             # partitioned node should not start or participate in election
+            if is_partitioned():
+                continue
+# ------------------------------------------------------------------
+
             with self.lock:
                 should_start = (
                     self.state != "leader" and
@@ -122,6 +167,12 @@ class RaftNode:
                 self._start_election()
 
     def _start_election(self):
+# ------------------------------------------------------------------
+# edit - shreya
+        # double-check partition inside the election incase the switch flipped between the loop check 
+        if is_partitioned():
+            return
+# ------------------------------------------------------------------
         self.state        = "candidate"
         self.current_term += 1
         self.voted_for    = self.id
@@ -136,9 +187,19 @@ class RaftNode:
         self._log(f"Starting election for term {term}")
 
         for peer_url in self.peers.values():
+# ------------------------------------------------------------------
+# edit - shreya
+# use safe_post() — returns None if partitioned, so if a partition flips mid-election that scenario is also handled 
+            resp = safe_post(f"{peer_url}/request-vote",
+                             {"term": term, "candidate_id": self.id},
+                             timeout=1.5)
+            if resp is None:
+                continue
+# ------------------------------------------------------------------
+
             try:
-                resp = requests.post(f"{peer_url}/request-vote",
-                                     json={"term": term, "candidate_id": self.id}, timeout=1.5)
+                # resp = requests.post(f"{peer_url}/request-vote",
+                #                      json={"term": term, "candidate_id": self.id}, timeout=1.5)
                 data = resp.json()
                 if data.get("term", 0) > self.current_term:
                     self._step_down(data["term"]); return
@@ -179,6 +240,19 @@ class RaftNode:
 
     def _heartbeat_loop(self):
         while True:
+# ------------------------------------------------------------------
+# edit - shreya
+# partition fix - partitioned leader must stop sending heartbeats asap
+# this is the issue where old leader kept asserting authority over peers while isolated.
+            if is_partitioned():
+                with self.lock:
+                    if self.state == "leader":
+                        self._log("Partitioned — stopping heartbeat loop, stepping down")
+                        self.state     = "follower"
+                        self.leader_id = None
+                        self.missed_heartbeats = 0
+                return
+# ------------------------------------------------------------------
             with self.lock:
                 if self.state != "leader":
                     return
@@ -186,10 +260,22 @@ class RaftNode:
 
             responses = 0
             for peer_url in self.peers.values():
+
+# ------------------------------------------------------------------
+# edit - shreya
+# partition fix - safe_post blocks outgoing heartbeats if partitioned
+
+                resp = safe_post(f"{peer_url}/append-entries",
+                                 {"term": term, "leader_id": lid},
+                                 timeout=1.0)
+                if resp is None:
+                    continue
+# ------------------------------------------------------------------
+
                 try:
-                    r = requests.post(f"{peer_url}/append-entries",
-                                      json={"term": term, "leader_id": lid}, timeout=1.0)
-                    if r.json().get("success"):
+                    # r = requests.post(f"{peer_url}/append-entries",
+                    #                   json={"term": term, "leader_id": lid}, timeout=1.0)
+                    if resp.json().get("success"):
                         responses += 1
                 except Exception:
                     pass
@@ -224,6 +310,13 @@ class RaftNode:
     # ── Request handlers ──
     def handle_request_vote(self, term, candidate_id):
         with self.lock:
+# ------------------------------------------------------------------
+# edit - shreya
+  # partition fix - a partitioned node must not grant votes 
+            if is_partitioned():
+                return {"term": self.current_term, "vote_granted": False}
+# ------------------------------------------------------------------
+
             if term < self.current_term:
                 return {"term": self.current_term, "vote_granted": False}
             if term > self.current_term:
@@ -239,10 +332,18 @@ class RaftNode:
 
     def handle_append_entries(self, term, leader_id, stroke=None):
         with self.lock:
+# ------------------------------------------------------------------
+# edit - shreya
+# partition fix - reject all AppendEntries when partitioned.  
+# Without this, a partitioned node could still accept a leader signal from the pre-partition leader
+            if is_partitioned():
+                return {"term": self.current_term, "success": False}
+# ------------------------------------------------------------------
             if term < self.current_term:
                 return {"term": self.current_term, "success": False}
             if term > self.current_term:
                 self._step_down(term)
+
             self.state, self.leader_id = "follower", leader_id
             self.last_heartbeat = time.time()
 
@@ -267,14 +368,26 @@ def create_app(node):
 
     @app.route("/request-vote", methods=["POST"])
     def request_vote():
+# ------------------------------------------------------------------
+# edit - shreya
+ # partition fix - block incoming vote requests at HTTP layer too (defence-in-depth)
+        if is_partitioned():
+            return jsonify({"term": 0, "vote_granted": False}), 503
+# ------------------------------------------------------------------
         d = request.json
         return jsonify(node.handle_request_vote(d["term"], d["candidate_id"]))
 
     @app.route("/append-entries", methods=["POST"])
     def append_entries():
+# ------------------------------------------------------------------
+# edit - shreya
+# partition fix - block incoming AppendEntries at HTTP layer too
+        if is_partitioned():
+            return jsonify({"success": False, "error": "partitioned"}), 503
+# ------------------------------------------------------------------
         d = request.json
         return jsonify(node.handle_append_entries(d["term"], d["leader_id"], d.get("stroke")))
-
+        
 # ------------------------------------------------------------------
 # edited /stroke - shreya 
 # Prevents accepting writes when node is isolated , only leader accepts writes , calls handle_undo(stroke_id)
@@ -299,13 +412,16 @@ def create_app(node):
         
         committed = 0
         for peer_url in node.peers.values():
+    #  partition fix - use safe_post here for consistency
+            resp = safe_post(
+                f"{peer_url}/append-entries",
+                {"term": term, "leader_id": leader_id, "stroke": stroke_data},
+                timeout=1.0
+            )
+            if resp is None:
+                continue
             try:
-                r = requests.post(
-                    f"{peer_url}/append-entries",
-                    json={"term": term, "leader_id": leader_id, "stroke": stroke_data},
-                    timeout=1.0
-                )
-                if r.json().get("success"):
+                if resp.json().get("success"):
                     committed += 1
             except Exception:
                 pass
@@ -327,7 +443,7 @@ def create_app(node):
     @app.route("/get_strokes", methods=["GET"])
     def get_strokes_api():
         with node.lock:
-            return jsonify({"strokes": get_strokes()})
+            return jsonify({"strokes": materialize_visible_strokes(node.stroke_log)})
 # ------------------------------------------------------------------
 
     @app.route("/election_history", methods=["GET"])
@@ -347,7 +463,7 @@ def create_app(node):
         html_path = os.path.join(os.path.dirname(__file__), "visualiser.html")
         with open(html_path, "r", encoding="utf-8") as f:
             return f.read()
-
+            
 # ------------------------------------------------------------------
 # edited /status - shreya
 # added partition awareness ; if node is in simulated netwrk partition return partitioned state instead of actual node status
@@ -364,7 +480,6 @@ def create_app(node):
         return jsonify({"partitioned": state})
     
 # ------------------------------------------------------------------
-
     return app
 
 
